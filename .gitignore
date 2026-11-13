@@ -1,0 +1,17 @@
+# --- data downloaded from Kaggle by the notebook
+/data/train/
+/data/test/
+# --- trained models, inference outputs, downloads and caches (models archive: reference/DOWNLOADS.json)
+/models/
+/work/
+/downloads/
+/.cache/
+*.pt
+*.pth
+*.tar
+*.npy
+*.npz
+# --- what the notebook writes
+/outputs/
+__pycache__/
+.ipynb_checkpoints/

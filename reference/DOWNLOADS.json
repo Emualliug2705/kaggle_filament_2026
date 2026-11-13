@@ -1,0 +1,45 @@
+{
+ "_comment": "Where section 0.1 of PIPELINE.ipynb downloads what is missing. gdrive: the Google Drive link or file id of filament_models.tar (shared as \"Anyone with the link\"); or kaggle_dataset: a private Kaggle dataset holding it; or put the file in downloads/.",
+ "kaggle_competition": "filament-segmentation-2026",
+ "gdrive": "https://drive.google.com/file/d/1OV9XdvO7Py1zkZEmGnV6gbC_ZS2vmQlQ/view?usp=sharing",
+ "kaggle_dataset": "",
+ "archive": {
+  "name": "filament_models.tar",
+  "sha256": "469a2790779afd7ddf922e92f59006a447ead49e5810aa3be0b8e1fcba7c0ddc",
+  "marker": "mask2former_limb-f4/model_e050.pt",
+  "size_bytes": 7356702720
+ },
+ "huggingface": {
+  "kernels-community/deformable-detr": {
+   "revision": "a4431ff2d5767c279f0ff2335a87a6828b77c7a0",
+   "files": [
+    "build/torch28-cxx11-cu128-x86_64-linux/__init__.py",
+    "build/torch28-cxx11-cu128-x86_64-linux/_ops.py",
+    "build/torch28-cxx11-cu128-x86_64-linux/layers.py",
+    "build/torch28-cxx11-cu128-x86_64-linux/metadata.json",
+    "build/torch28-cxx11-cu128-x86_64-linux/_deformable_detr_d7966ee.abi3.so",
+    "build/torch28-cxx11-cu128-x86_64-linux/deformable_detr/__init__.py"
+   ]
+  },
+  "facebook/mask2former-swin-small-coco-instance": {
+   "revision": "1b7ac418a0f3cb5edfc5037e488d53587b8bb76b",
+   "files": [
+    "config.json",
+    "model.safetensors"
+   ]
+  },
+  "timm/convnext_tiny.in12k_ft_in1k": {
+   "revision": "aa096f03029c7f0ec052013f64c819b34f8ad790",
+   "files": [
+    "model.safetensors"
+   ]
+  },
+  "smp-hub/resnet34.imagenet": {
+   "revision": "7a57b34f723329ff020b3f8bc41771163c519d0c",
+   "files": [
+    "config.json",
+    "model.safetensors"
+   ]
+  }
+ }
+}
