@@ -141,7 +141,9 @@ What each fold's UI shows (experiment `{family}-f{K}`, folder `models/{family}-f
   * `val/pq` (pooled PQ of the best emission rule), plus `val/sq`, `val/rq` and the chosen threshold, at every
     5-epoch evaluation.
 * **Per-photo signals**:
-  * `train/photo_loss`: each crop's own loss, on its photo, every step.
+  * `train/photo_loss`, `train/photo_cross_entropy`, `train/photo_mask`, `train/photo_dice`: each crop's own loss and
+    its three terms (each summed over the final output and the 9 auxiliary decoder layers; they add up to the loss),
+    on its photo, every step.
   * `val/photo_pq`, `val/photo_tp`, `val/photo_fp`, `val/photo_fn`: each held-out photo at each evaluation.
 * The pause button holds training between two steps. Hyperparameter inputs are read-only: the trainer does not read
   them back.
@@ -159,7 +161,8 @@ It reads every run under `models/` (never modifies them; a run still training is
 * **Per-family per-photo columns**:
   * `{family}/oof_pq`, `oof_tp`, `oof_fp`, `oof_fn`: from the one fold that held the photo out, at its last
     evaluation.
-  * `{family}/train_loss`: averaged over the four folds that trained on it (last 10 % of steps).
+  * `{family}/train_loss`, `train_cross_entropy`, `train_mask`, `train_dice`: averaged over the four folds that trained
+    on it (last 10 % of steps).
 * Every fold's per-photo trajectories.
 
 A photo has the same WeightsLab id in every run and in the global view (a hash of its cached thumbnail,

@@ -2,8 +2,9 @@
 transformers' own Mask2Former loss, batch 8 by gradient accumulation, 50 epochs annealed to zero, held-out
 evaluation every 5 epochs (validation caches and PQ sweeps next to the checkpoints). Resumable from last.pt.
 
-WeightsLab (src.utils.weightslab_monitor) receives the step loss and its three terms, each crop's own loss on its photo,
-and every finished evaluation: the pooled PQ of the best rule and each held-out photo's PQ, TP, FP and FN."""
+WeightsLab (src.utils.weightslab_monitor) receives the step loss and its three terms, each crop's own loss and own three
+terms on its photo, and every finished evaluation: the pooled PQ of the best rule and each held-out photo's PQ, TP, FP
+and FN."""
 from __future__ import annotations
 
 import argparse
@@ -170,7 +171,9 @@ def step_losses(model, pending: list, device, args, captured: dict, details: lis
     """Forward, scale and backward every micro-batch of one optimiser step.
 
     details (WeightsLab): receives, per micro-batch, (photo names, the micro-batch's own loss, its weighted share of
-    the step loss split into cross-entropy, mask and Dice terms)."""
+    the step loss split into cross-entropy, mask and Dice terms, the micro-batch's own cross-entropy, mask and Dice
+    terms). Each term is summed over the final output and the auxiliary decoder layers; the three own terms add up to
+    the own loss."""
     counts = [step_shares(classes, model.config.num_queries, model.config.no_object_weight)
               for _, _, classes, _, _, _ in pending]
     total_masks = max(1e-12, sum(count[0] for count in counts))
@@ -192,9 +195,10 @@ def step_losses(model, pending: list, device, args, captured: dict, details: lis
         if details is not None:
             terms = captured["dict"]
             group = lambda word: float(sum(t.detach() for k, t in terms.items() if word in k))  # noqa: E731
+            own = {"cross_entropy": group("cross_entropy"), "mask": group("loss_mask"), "dice": group("loss_dice")}
             details.append((names, float(sum(t.detach() for t in terms.values())),
-                            {"cross_entropy": group("cross_entropy") * class_share,
-                             "mask": group("loss_mask") * mask_share, "dice": group("loss_dice") * mask_share}))
+                            {"cross_entropy": own["cross_entropy"] * class_share,
+                             "mask": own["mask"] * mask_share, "dice": own["dice"] * mask_share}, own))
     return value
 
 
@@ -466,7 +470,9 @@ def main() -> int:
                                          "train/epoch": epoch + epoch_steps / steps_per_epoch,
                                          **{f"train/{k}": sum(d[2][k] for d in details) for k in details[0][2]}})
                     monitor.samples(step, [n for d in details for n in d[0]],
-                                    {"train/photo_loss": [d[1] for d in details for _ in d[0]]})
+                                    {"train/photo_loss": [d[1] for d in details for _ in d[0]],
+                                     **{f"train/photo_{k}": [d[3][k] for d in details for _ in d[0]]
+                                        for k in ("cross_entropy", "mask", "dice")}})
             window_steps += 1
             if step == 5 and probe_started is None:
                 probe_started = time.time()
