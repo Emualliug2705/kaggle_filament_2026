@@ -66,7 +66,4 @@ transformers==4.57.6
 triton==3.4.0
 typing_extensions==4.16.0
 tzdata==2026.6
-ultralytics==8.4.153
-ultralytics-platform==0.1.108
-ultralytics-thop==2.2.5
 urllib3==2.8.0
