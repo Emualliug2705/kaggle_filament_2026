@@ -54,7 +54,40 @@ file **byte for byte**; its last check compares SHA-256 hashes.
 * **Training.** The training code was checked against the original runs: same losses at the first steps (to the digit for the ROI models,
   within GPU rounding noise for Mask2Former).
 * **Time.** With the downloaded models, a run takes about 45 min on 4 x 12 GB GPUs (U-Net maps, then ~15 min of CPU for the scorer and
-  redraw). Retraining all 40 models takes about 115 GPU-hours, about 28 h on 4 x 12 GB GPUs.
+  redraw). Retraining all 40 models takes about 115 GPU-hours, about 28 h on 4 x 12 GB GPUs (details below).
+
+### Hardware used
+
+The models were trained, and the submission produced, on one rented cloud GPU server:
+
+| | |
+|---|---|
+| GPUs | 4 x NVIDIA GeForce RTX 3080 Ti, 12 GB each (PCIe 4.0 x16), driver 595.99 |
+| CPU | 2 x AMD EPYC 7543 (32 cores each); the container was limited to about 27 cores |
+| Memory | 377 GB RAM, including a 41 GB RAM disk (`/dev/shm`) for the large intermediate files |
+| Disk | 32 GB |
+| Software | Ubuntu 24.04, Python 3.12.3, PyTorch 2.8.0 with CUDA 12.8 |
+
+### Training time, and why it is long
+
+Retraining all 40 models takes about 115 GPU-hours, about 28 h on this server. Inference adds about 1.5 h.
+
+| Models | Runs | Time per run | GPU-hours | Wall time on the 4 GPUs |
+|---|---|---|---|---|
+| Mask2Former, 2 families x 5 folds | 10 | ~5.5 h | ~55 | ~16.5 h (one run per GPU, 3 rounds) |
+| Mask R-CNN + 3 U-Nets, 5 folds | 20 | 1.2-2.7 h | ~35 | ~4.5 h (two runs per GPU) |
+| ROI detector + refiner, 5 folds | 10 | 2-3 h | ~25 | ~5 h (up to 4 runs per GPU) |
+
+* **Every model is trained 5 times**, once per fold. The scorer learns from out-of-fold predictions, so every training photo must be
+  predicted by models that never saw it.
+* **Mask2Former trains at native resolution**: 1024-pixel crops and whole 2048-pixel frames, 50 epochs of 231 optimiser steps (batch 8).
+  On a 12 GB GPU the batch of 8 is accumulated one image at a time, and the backbone is recomputed in the backward pass (gradient
+  checkpointing), so a step takes about 1.6 s. The held-out evaluations every 5 epochs add the rest.
+* **12 GB limits sharing**: only one Mask2Former training fits on a GPU. A GPU with 40-80 GB of memory would avoid the accumulation and
+  the recomputation, so it should be faster per step (not measured here).
+* **A cheaper variant**: in the report's ablations, the ROI detector + refiner and the second Mask2Former family each add nothing
+  measurable out of fold. Without them, retraining would take about 62 GPU-hours (about 15 h on 4 GPUs). Removing both at once was not
+  measured.
 
 ### Setup
 
