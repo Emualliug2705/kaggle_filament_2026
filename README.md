@@ -54,7 +54,7 @@ file **byte for byte**; its last check compares SHA-256 hashes.
 * **Training.** The training code was checked against the original runs: same losses at the first steps (to the digit for the ROI models,
   within GPU rounding noise for Mask2Former).
 * **Time.** With the downloaded models, a run takes about 45 min on 4 x 12 GB GPUs (U-Net maps, then ~15 min of CPU for the scorer and
-  redraw). Retraining everything takes about 30 GPU-hours.
+  redraw). Retraining all 40 models takes about 115 GPU-hours, about 28 h on 4 x 12 GB GPUs.
 
 ### Setup
 
