@@ -1,6 +1,8 @@
 """WeightsLab supervision of one training run: live curves, per-photo signals and a web UI per (model, fold).
 
-Every trainer calls `start(model, fold, out_dir, config, train_names, val_names)` once, then reports what it computes:
+Used by the Mask2Former trainer (src/models/mask2former/train.py), the first-level models; the evidence models (U-Nets,
+Mask R-CNN, ROI) train without it. A trainer calls `start(model, fold, out_dir, config, train_names, val_names)` once,
+then reports what it computes:
 
     monitor = weightslab_monitor.start("unet_cnx", 0, out_dir, vars(args), train_names, val_names)
     with monitor.train_step():                       # one optimiser step (the UI's pause button waits here)
@@ -12,9 +14,8 @@ Every trainer calls `start(model, fold, out_dir, config, train_names, val_names)
     weightslab_monitor.finish(exit_code)             # flush, then exit
 
 Training is not changed. WeightsLab never wraps the model, the optimiser, the losses or the data loaders: it is given
-copies of the numbers the trainer already computes. Its own start-up runs with the random generators saved and restored,
-and `preserve_rng()` does the same around any held-out pass a trainer adds. So the weights do not depend on whether
-WeightsLab is on.
+copies of the numbers the trainer already computes, and its own start-up runs with the random generators saved and
+restored. So the weights do not depend on whether WeightsLab is on.
 
 Names: curves are train/* and val/*; per-photo signals are train/photo_* and val/photo_* (each is also plotted as its
 mean over the photos of the step).
@@ -38,7 +39,6 @@ Environment:
     FILAMENT_WL_UI_PORT=8100       first UI port;  FILAMENT_WL_GRPC_PORT=50100  first gRPC port
     FILAMENT_WL_HOST=0.0.0.0       interface the UI binds
     FILAMENT_WL_LINGER=0           seconds the UI stays up after training (e.g. 3600 to inspect a finished run)
-    FILAMENT_WL_EVAL_EVERY         steps between the held-out passes the U-Net, Mask R-CNN and ROI trainers add
 """
 from __future__ import annotations
 

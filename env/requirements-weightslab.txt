@@ -1,4 +1,4 @@
-# v2 branch: WeightsLab supervision of the trainings (src/utils/weightslab_monitor.py).
+# v2 branch: WeightsLab supervision of the Mask2Former trainings (src/utils/weightslab_monitor.py).
 # Install after requirements-venv.txt and requirements-extra.txt, as a second pip command:
 #     pip install -r env/requirements-weightslab.txt
 # WeightsLab 2.0.3 needs pandas < 3, Pillow < 12 and ipykernel < 7, so this replaces those three packages.

@@ -7,15 +7,11 @@ Resumable: a checkpoint every 1000 steps (the sampler is indexed by step, so a r
 
 Weights: models/roi_<stage>-f<k>/weights.pt (+ run.json). The ROI code reads its configs, manifests, photos and target
 cache through the workspace work/roi, prepared here.
-
-WeightsLab (src.utils.weightslab_monitor) receives the loss curves, each sample's loss on its photo, and a held-out loss
-pass (two fixed samples per held-out photo) every FILAMENT_WL_EVAL_EVERY steps (default 1500 detector, 3000 refiner).
 """
 from pathlib import Path
 import sys, os, argparse, time, math, json, shutil
 
 from src import paths
-from src.utils import weightslab_monitor
 
 ROOT = paths.WORK / 'roi'                                           # the ROI workspace (relative paths of the ROI code)
 SHM = Path(os.environ.get('ROI_SCRATCH', str(paths.SCRATCH / 'roi_runs'))); DISK = Path(os.environ.get('ROI_MODELS', str(paths.MODELS)))
@@ -101,15 +97,6 @@ def main():
     det_path = ROOT / 'checkpoints/pretrained' / Path(DET_URL).name
     if args.stage == 'detector' and not det_path.is_file():
         torch.hub.download_url_to_file(DET_URL, str(det_path), hash_prefix='dd69338a', progress=False)
-    monitor = weightslab_monitor.start(f'roi_{args.stage}', args.fold, DISK / tag,
-                                       dict(vars(args), spec=s, steps=steps), idx.train_names, idx.validation_names)
-    eval_every = int(os.environ.get('FILAMENT_WL_EVAL_EVERY', 1500 if args.stage == 'detector' else 3000))
-    held = {}
-    if monitor.active and idx.validation_names:
-        # One sampler per held-out photo, so every photo gets exactly two samples; its own seed, the training draws unchanged.
-        vidx = own_index(args.fold); vidx.train_names = list(idx.validation_names)
-        with weightslab_monitor.preserve_rng():
-            held = {name: G4Samples(vidx, args.stage, seed=args.seed + 1, limit_names=[name]) for name in vidx.train_names}
     t0 = time.time(); data = G4Samples(idx, args.stage, seed=args.seed)
     print(json.dumps({'tag': tag, 'bank_photos': len(data.names), 'bank_seconds': round(time.time() - t0), 'held_out': len(idx.validation_names)}), flush=True)
     if args.stage == 'refiner':
@@ -135,66 +122,22 @@ def main():
            'held_out_names': idx.validation_names, 'started': time.time()}
     (d / 'run.json').write_text(json.dumps(run))
     batch, micro = s['effective_batch'], s['micro_batch']; t_start = time.time(); amp = dev.type == 'cuda'
-
-    def sample_losses(samples, keep_graph):
-        """(loss of the micro-batch, {component: value} or {}, per-sample losses for WeightsLab)."""
-        with torch.autocast('cuda', dtype=torch.bfloat16, enabled=amp):
-            if args.stage == 'detector':
-                x = [torch.from_numpy(v[0]).to(dev) for v in samples]
-                targets = [{k: torch.from_numpy(vv).to(dev) for k, vv in v[1].items()} for v in samples]
-                parts = model(x, targets)
-                loss = sum(parts.values())
-                # micro_batch is 1 for the detector, so the micro-batch loss is the sample's own loss.
-                return loss, parts, [float(loss.detach())] * len(samples)
-            x = torch.from_numpy(np.stack([v[0] for v in samples])).to(dev)
-            target = torch.from_numpy(np.stack([v[1] for v in samples])).to(dev)
-            out = model(x)
-            loss = segmentation_loss(out, target)
-            own = []
-            if keep_graph is False or monitor.active:
-                with torch.no_grad():
-                    own = [float(segmentation_loss(out[j:j + 1].detach(), target[j:j + 1])) for j in range(len(samples))]
-            return loss, {}, own
-
-    def held_out_pass(step):
-        values = {}
-        with weightslab_monitor.preserve_rng(), weightslab_monitor.preserve_modes(model), torch.no_grad():
-            if args.stage == 'detector':
-                model.train()                          # torchvision computes losses only in training mode
-            else:
-                model.eval()
-            for module in model.modules():
-                if isinstance(module, nn.modules.batchnorm._BatchNorm): module.eval()
-            for name, sampler in held.items():
-                for item in (0, 1):
-                    try:
-                        _, _, own = sample_losses([sampler.sample(item)], keep_graph=False)
-                    except Exception:                  # a photo the sampler cannot draw from is skipped
-                        continue
-                    values.setdefault(name, []).extend(own)
-        names = sorted(values)
-        with monitor.evaluation():
-            monitor.samples(step, names, {'val/photo_loss': [float(np.mean(values[n])) for n in names]})
-
     for step in range(first, steps + 1):
-        with monitor.train_step():                        # the UI's pause button holds training here
-            optimizer.zero_grad(set_to_none=True); value = 0.; parts_sum = {}; seen = []; own_losses = []
-            for offset in range(0, batch, micro):
-                samples = [data.sample((step - 1) * batch + offset + j) for j in range(micro)]
-                loss, parts, own = sample_losses(samples, keep_graph=True)
-                assert torch.isfinite(loss).item(); (loss * micro / batch).backward(); value += float(loss.detach()) * micro / batch
-                if monitor.active:
-                    for k, v in parts.items():
-                        parts_sum[k] = parts_sum.get(k, 0.) + float(v.detach()) * micro / batch
-                    seen += [v[2]['file_name'] for v in samples]; own_losses += own
-            norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)); assert math.isfinite(norm)
-            optimizer.step(); scheduler.step()
-            if monitor.active:
-                monitor.log(step, **{'train/loss': value, 'train/grad_norm': norm, 'train/lr': optimizer.param_groups[0]['lr'],
-                                     **{f'train/{k[5:]}': v for k, v in parts_sum.items()}})
-                monitor.samples(step, seen, {'train/photo_loss': own_losses})
-        if held and (step % eval_every == 0 or step == steps):
-            held_out_pass(step)
+        optimizer.zero_grad(set_to_none=True); value = 0.
+        for offset in range(0, batch, micro):
+            samples = [data.sample((step - 1) * batch + offset + j) for j in range(micro)]
+            with torch.autocast('cuda', dtype=torch.bfloat16, enabled=amp):
+                if args.stage == 'detector':
+                    x = [torch.from_numpy(v[0]).to(dev) for v in samples]
+                    targets = [{k: torch.from_numpy(vv).to(dev) for k, vv in v[1].items()} for v in samples]
+                    loss = sum(model(x, targets).values())
+                else:
+                    x = torch.from_numpy(np.stack([v[0] for v in samples])).to(dev)
+                    target = torch.from_numpy(np.stack([v[1] for v in samples])).to(dev)
+                    loss = segmentation_loss(model(x), target)
+            assert torch.isfinite(loss).item(); (loss * micro / batch).backward(); value += float(loss.detach()) * micro / batch
+        norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)); assert math.isfinite(norm)
+        optimizer.step(); scheduler.step()
         if step % 250 == 0 or step == steps or step == first:
             el = time.time() - t_start
             print(json.dumps({'tag': tag, 'step': step, 'loss': round(value, 4), 'sec_per_step': round(el / (step - first + 1), 3),
@@ -213,4 +156,4 @@ def main():
 
 
 if __name__ == '__main__':
-    weightslab_monitor.run_main(main)
+    main()

@@ -1,7 +1,5 @@
 """Mask R-CNN training: 1024 px crops, COCO start, 12,000 iterations, batch 4, SGD lr 0.01 with warm-up and cosine decay.
-The photos whose meta fold equals --fold are held out. WeightsLab (src.utils.weightslab_monitor) receives the loss curves,
-each step's loss on the photos of its 4 crops (torchvision gives no per-image loss), and a held-out loss pass every
-FILAMENT_WL_EVAL_EVERY steps (default 1500).
+The photos whose meta fold equals --fold are held out.
 
     python -m src.training.train_maskrcnn --name maskrcnn-f0 --fold 0 --cache DIR --runs models --ann ANNOTATIONS"""
 from __future__ import annotations
@@ -19,7 +17,6 @@ from pycocotools import mask as mu
 
 from src import paths
 from src.models.maskrcnn import build
-from src.utils import weightslab_monitor
 
 H = W = 2048
 CACHE = str(paths.WORK / 'train_cache')
@@ -88,37 +85,11 @@ class Crops(torch.utils.data.Dataset):
         tgt = {'boxes': torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
                'labels': torch.ones(len(masks), dtype=torch.int64),
                'masks': torch.from_numpy(np.stack(masks)) if masks else torch.zeros((0, C, C), dtype=torch.uint8)}
-        # i (the photo) only labels the crop for WeightsLab; it takes no part in the sampling above.
-        return x, tgt, i
+        return x, tgt
 
 
 def collate(b):
     return tuple(zip(*b))
-
-
-def held_out_pass(monitor, model, held, step):
-    """Loss of the held-out crops in training mode (torchvision computes losses only there), without gradients, with
-    every BatchNorm in eval mode (so no running statistic moves) and the random generators restored afterwards."""
-    per = {}
-    with weightslab_monitor.preserve_rng(), weightslab_monitor.preserve_modes(model), torch.no_grad():
-        model.train()
-        for mod in model.modules():
-            if isinstance(mod, torch.nn.modules.batchnorm._BatchNorm):
-                mod.eval()
-        for name, sampler in held:
-            crops = [sampler[k] for k in (0, 1)]                 # the same two crops at every pass
-            xs = [c[0].cuda(non_blocking=True) for c in crops]
-            ts = [{k: v.cuda(non_blocking=True) for k, v in c[1].items()} for c in crops]
-            with torch.autocast('cuda', dtype=torch.bfloat16):
-                losses = model(xs, ts)
-            per[name] = {k: float(v) for k, v in losses.items()}
-    if not per:
-        return
-    order = sorted(per)
-    keys = list(per[order[0]])
-    with monitor.evaluation():
-        monitor.samples(step, order, {'val/photo_loss': [sum(per[n].values()) for n in order],
-                                      **{f'val/photo_{k[5:]}': [per[n][k] for n in order] for k in keys}})
 
 
 def train(a):
@@ -129,14 +100,6 @@ def train(a):
     rec = {k: v for k, v in vars(a).items() if k not in ('cache', 'runs', 'ann', 'config')}
     with open(os.path.join(out, 'args.json'), 'w', encoding='utf-8') as fh:
         json.dump(rec | {'n_train_images': len(idx)}, fh, indent=1)
-    held_idx = [i for i, m in enumerate(meta) if m['fold'] == a.fold]
-    monitor = weightslab_monitor.start(a.name.rsplit('-f', 1)[0], a.fold, out, rec,
-                                       [meta[i]['file_name'] for i in idx], [meta[i]['file_name'] for i in held_idx])
-    eval_every = int(os.environ.get('FILAMENT_WL_EVAL_EVERY', 1500))
-    rles = record_rles(a.ann)
-    # Two fixed crops per held-out photo, drawn by the training sampler restricted to that photo, with its own seed.
-    held = [(meta[i]['file_name'], Crops([i], meta, rles, a.crop, 2, 7919, a.target, a.cache)) for i in held_idx] \
-        if monitor.active and held_idx else None
     torch.manual_seed(a.seed)
     model = build(pretrained=not a.init, mask56=a.mask56)
     if a.init:  # continue from another run's weights (e.g. det-f0 for a mask-branch fine-tune)
@@ -148,7 +111,7 @@ def train(a):
     model = model.cuda()
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.SGD(params, lr=a.lr, momentum=0.9, weight_decay=1e-4)
-    ds = Crops(idx, meta, rles, a.crop, a.iters * a.bs, a.seed, a.target, a.cache)
+    ds = Crops(idx, meta, record_rles(a.ann), a.crop, a.iters * a.bs, a.seed, a.target, a.cache)
     dl = torch.utils.data.DataLoader(ds, batch_size=a.bs, num_workers=a.workers, collate_fn=collate,
                                      persistent_workers=True, prefetch_factor=4)
     log = open(os.path.join(out, 'log.txt'), 'a', encoding='utf-8'); t0 = time.time()
@@ -157,33 +120,25 @@ def train(a):
         for n_, mod in model.named_modules():
             if isinstance(mod, torch.nn.BatchNorm2d) and not n_.startswith('roi_heads.mask_head'):
                 mod.eval()
-    for step, (xs, ts, photos) in enumerate(dl, 1):
-        with monitor.train_step():                        # the UI's pause button holds training here
-            f = step / a.warmup if step < a.warmup else 0.5 * (1 + math.cos(math.pi * (step - a.warmup) / (a.iters - a.warmup)))
-            for g in opt.param_groups:
-                g['lr'] = a.lr * max(f, 0.01)
-            xs = [x.cuda(non_blocking=True) for x in xs]
-            ts = [{k: v.cuda(non_blocking=True) for k, v in t.items()} for t in ts]
-            with torch.autocast('cuda', dtype=torch.bfloat16):
-                losses = model(xs, ts)
-            loss = losses['loss_mask'].float() if a.mask_only else sum(v.float() for v in losses.values())
-            if not torch.isfinite(loss):
-                print('non-finite loss, skipping', step, flush=True); opt.zero_grad(set_to_none=True); continue
-            opt.zero_grad(set_to_none=True); loss.backward()
-            torch.nn.utils.clip_grad_norm_(params, 10.0); opt.step()
-            if monitor.active:
-                value = float(loss.detach())
-                monitor.log(step, **{'train/loss': value, 'train/lr': opt.param_groups[0]['lr'],
-                                     **{f'train/{k[5:]}': float(v.detach()) for k, v in losses.items()}})
-                monitor.samples(step, [meta[int(i)]['file_name'] for i in photos], {'train/photo_batch_loss': [value] * len(photos)})
+    for step, (xs, ts) in enumerate(dl, 1):
+        f = step / a.warmup if step < a.warmup else 0.5 * (1 + math.cos(math.pi * (step - a.warmup) / (a.iters - a.warmup)))
+        for g in opt.param_groups:
+            g['lr'] = a.lr * max(f, 0.01)
+        xs = [x.cuda(non_blocking=True) for x in xs]
+        ts = [{k: v.cuda(non_blocking=True) for k, v in t.items()} for t in ts]
+        with torch.autocast('cuda', dtype=torch.bfloat16):
+            losses = model(xs, ts)
+        loss = losses['loss_mask'].float() if a.mask_only else sum(v.float() for v in losses.values())
+        if not torch.isfinite(loss):
+            print('non-finite loss, skipping', step, flush=True); opt.zero_grad(set_to_none=True); continue
+        opt.zero_grad(set_to_none=True); loss.backward()
+        torch.nn.utils.clip_grad_norm_(params, 10.0); opt.step()
         if step % 100 == 0:
             msg = f'step {step} loss {loss.item():.4f} ' + ' '.join(f'{k[5:]}={v.item():.3f}' for k, v in losses.items()) + \
                   f' {(time.time()-t0)/step:.3f}s/it mem {torch.cuda.max_memory_allocated()/2**30:.2f}G'
             print(msg, flush=True); log.write(msg + '\n'); log.flush()
         if step % 3000 == 0 or step == a.iters:
             torch.save(model.state_dict(), os.path.join(out, 'model.pt'))
-        if held is not None and (step % eval_every == 0 or step == a.iters):
-            held_out_pass(monitor, model, held, step)
     log.close()
     with open(os.path.join(out, 'done.json'), 'w', encoding='utf-8') as fh:
         json.dump({'done': True, 'sec': time.time() - t0}, fh)
@@ -215,4 +170,4 @@ def parse(argv=None):
 
 
 if __name__ == '__main__':
-    weightslab_monitor.run_main(lambda: train(parse()))
+    train(parse())
