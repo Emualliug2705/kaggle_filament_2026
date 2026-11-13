@@ -17,7 +17,7 @@ OUTPUTS = _folder("FILAMENT_OUTPUTS", REPO / "outputs")    # submission, figures
 DOWNLOADS = _folder("FILAMENT_DOWNLOADS", REPO / "downloads")  # downloaded archives (7.4 GB while extracting)
 CONFIGS = REPO / "configs"
 
-FOLDS_JSON = Path(os.environ.get("FILAMENT_FOLDS_JSON", DATA / "folds.json"))
+FOLDS_JSON = Path(os.environ.get("FILAMENT_FOLDS_JSON", REPO / "data" / "folds.json"))   # tracked in the repository
 ANNOTATIONS = DATA / "train" / "MAGFiLO_1.0_Annotations_kaggle2026_train.json"
 TRAIN_IMAGES = DATA / "train" / "train_images"
 TEST_IMAGES = DATA / "test" / "test_images"
