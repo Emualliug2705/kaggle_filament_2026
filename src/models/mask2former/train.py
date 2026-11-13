@@ -295,6 +295,30 @@ def main() -> int:
         install_batched_loss(model)
     capture = capture_loss_dict(model)
 
+    if monitor.active:
+        # The UI's Evaluate button (training paused or not; it runs between two steps): whole-photo predictions of the
+        # current weights for the photos of the requested split, emitted under the latest evaluation's best rule.
+        from src.models.mask2former.evaluate import emitted_masks
+        from src.models.mask2former.model import predict_photograph
+
+        def predict_for_weightslab(names):
+            rule = latest_rule()
+            with weightslab_monitor.preserve_rng(), weightslab_monitor.preserve_modes(model), torch.no_grad():
+                model.eval()
+                cache = {n: predict_photograph(model, read_gray(args.images / n), device, args.bf16, floor=0.05)
+                         for n in names}
+            masks = emitted_masks(cache, names, rule["conf"], rule["grow"], rule["min_area"])
+            return masks, {"eval/photo_filament_pixels": masks.reshape(len(names), -1).sum(1),
+                           "eval/photo_conf": [rule["conf"]] * len(names)}
+
+        def latest_rule():
+            reports = sorted(args.output.glob("e[0-9][0-9][0-9]_sweep.json"))
+            if reports:
+                return json.loads(reports[-1].read_text())["best"]
+            return {"conf": 0.5, "grow": 0, "min_area": 300}
+
+        monitor.on_evaluate(predict_for_weightslab)
+
     groups, counts = parameter_groups(model, args.lr, args.weight_decay, args.backbone_multiplier)
     # The fused AdamW kernel applies the same update as the default implementation.
     optimiser = torch.optim.AdamW(groups, lr=args.lr, betas=(0.9, 0.999), fused=device.type == "cuda")

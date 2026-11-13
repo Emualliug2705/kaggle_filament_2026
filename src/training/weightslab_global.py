@@ -92,12 +92,15 @@ def run_identity(run: Path) -> tuple[str, int]:
     return model, int(fold) if fold.isdigit() else -1
 
 
-def per_photo_columns(sources: dict) -> dict:
-    """{column: {sample id: value}} pooled per model over its folds (see the module docstring)."""
+def per_photo_columns(sources: dict, to_global: dict) -> dict:
+    """{column: {sample id: value}} pooled per model over its folds (see the module docstring).
+
+    to_global[(model, fold)] maps the run's sample ids to the global view's (through the photo names)."""
     import duckdb
     train_parts = defaultdict(lambda: defaultdict(list))         # column -> sample -> [value per run]
     oof = defaultdict(dict)
     for (model, fold), db in sources.items():
+        remap = to_global.get((model, fold), {})
         con = duckdb.connect(str(db), read_only=True)
         for (metric,) in con.execute("SELECT DISTINCT metric_name FROM per_sample").fetchall():
             if metric.startswith("val/"):
@@ -107,7 +110,8 @@ def per_photo_columns(sources: dict) -> dict:
                     GROUP BY sample_id""", [metric, metric]).fetchall()
                 column = f"{model}/oof_{metric[4:].removeprefix('photo_')}"
                 for sid, value in rows:
-                    oof[column][str(sid)] = float(value)
+                    if str(sid) in remap:
+                        oof[column][remap[str(sid)]] = float(value)
             elif metric.startswith("train/"):
                 last = con.execute("SELECT max(step) FROM per_sample WHERE metric_name = ?", [metric]).fetchone()[0]
                 rows = con.execute("""
@@ -115,7 +119,8 @@ def per_photo_columns(sources: dict) -> dict:
                     WHERE metric_name = ? AND step >= ? GROUP BY sample_id""", [metric, int(last * 0.9)]).fetchall()
                 column = f"{model}/train_{metric[6:].removeprefix('photo_')}"
                 for sid, value in rows:
-                    train_parts[column][str(sid)].append(float(value))
+                    if str(sid) in remap:
+                        train_parts[column][remap[str(sid)]].append(float(value))
         con.close()
     out = dict(oof)
     for column, per_sample in train_parts.items():
@@ -124,11 +129,11 @@ def per_photo_columns(sources: dict) -> dict:
 
 
 def oof_predictions(runs: list[Path], family: str) -> dict:
-    """{photo: mask} from the latest e###_pred256.npz of each fold of `family` (its held-out photos)."""
+    """{photo: mask} from the latest e###_pred2048.npz of each fold of `family` (its held-out photos)."""
     out = {}
     for run in runs:
         model, fold = run_identity(run)
-        files = sorted(run.glob("e[0-9][0-9][0-9]_pred256.npz"))
+        files = sorted(run.glob("e[0-9][0-9][0-9]_pred2048.npz"))
         if model != family or fold < 0 or not files:
             continue
         z = np.load(files[-1])
@@ -184,7 +189,12 @@ def serve(models: Path, ui_port: int, grpc_port: int, pred_family: str = "mask2f
         wl.set_categorical_tag([uid[n] for n in view.names if n not in held_out], f"fold{k}", "train")
         wl.set_categorical_tag([uid[n] for n in view.names if n in held_out], f"fold{k}", "val")
 
-    columns = per_photo_columns(sources)
+    to_global = {}
+    for run in runs:
+        ids_file = run / "weightslab_ids.json"
+        if ids_file.is_file():
+            to_global[run_identity(run)] = {str(u): uid[n] for n, u in json.loads(ids_file.read_text()).items() if n in uid}
+    columns = per_photo_columns(sources, to_global)
     known = set(ids)
     for column, values in sorted(columns.items()):
         sids = [s for s in values if s in known]

@@ -133,11 +133,17 @@ pip install -r env/requirements-weightslab.txt      # after the Setup install; W
 * On a remote GPU machine, forward the ports: `ssh -N -L 8100:localhost:8100 -L 8101:localhost:8101 ... user@host`.
 
 What each fold's UI shows (experiment `{family}-f{K}`, folder `models/{family}-f{K}/`):
-* **Data**: the 707 training photos, split as `fold{K}_train` and `fold{K}_val` and tagged `fold{K}` = train | val, with
-  two masks over each photo, in two classes (filament / background):
+* **Data**: the 707 training photos at full resolution (2048 px, also in the zoomed view), split as `fold{K}_train` and
+  `fold{K}_val` and tagged `fold{K}` = train | val, with two 2048 px masks over each photo, in two classes (filament /
+  background):
   * Ground truth: filament where at least one annotator drew one.
-  * Prediction: held-out photos only. The filaments emitted at the latest 5-epoch evaluation under its best rule; none
-    before the first evaluation. Training photos have none: training sees crops, never whole-photo predictions.
+  * Prediction:
+    * Held-out photos: the filaments emitted at the latest 5-epoch evaluation, under its best rule.
+    * Any photo, on request: pause if you like, open Evaluate, pick a split (e.g. `fold{K}_train`, optionally filtered
+      by tags) and run it. The trainer's own evaluation function predicts each photo with the current weights and
+      emits it with the latest evaluation's best rule (before the first evaluation: conf 0.5, no erosion, area 300).
+      Training waits between two steps while it runs (~2 s per photo). WeightsLab shows new predictions after its
+      next refresh (~30 s).
   * Columns: site, date, annotator count, user fold.
 * **Curves**:
   * `train/loss` with its cross-entropy, mask and Dice terms, plus learning rate and epoch, every step.
@@ -169,8 +175,8 @@ It reads every run under `models/` (never modifies them; a run still training is
     on it (last 10 % of steps).
 * Every fold's per-photo trajectories.
 
-A photo has the same WeightsLab id in every run and in the global view (a hash of its cached thumbnail,
-`work/weightslab/photos_256.npz`).
+Each run writes `weightslab_ids.json` (photo → WeightsLab id), and the global view matches runs through these files, by
+photo name.
 
 Settings (environment): `FILAMENT_WEIGHTSLAB=0` turns it off (it is also off when the package is not installed);
 `FILAMENT_WL_UI_PORT` / `FILAMENT_WL_GRPC_PORT` move the port ranges (8100 / 50100); `FILAMENT_WL_HOST` (0.0.0.0);

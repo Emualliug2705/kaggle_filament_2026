@@ -20,18 +20,19 @@ BASELINE_PQ = 0.4558638687292126          # parity check: PQ of a stored referen
 REFERENCE_PQ = 0.46814553                 # an earlier best validation PQ, reported next to each sweep
 CONFS = tuple(round(0.05 * i, 2) for i in range(1, 20))
 EMISSION = [(grow, area) for grow in (0, -1) for area in (100, 300)]
-PRED_SIZE = 256                          # side of the prediction masks written for WeightsLab
+PRED_SIZE = 2048                         # side of the prediction masks written for WeightsLab (full resolution)
 
 
-def emitted_masks(cache: dict, names: list[str], conf: float, grow: int, min_area: int) -> np.ndarray:
-    """(N, PRED_SIZE, PRED_SIZE) uint8: the filaments the rule emits for each photo (1) over background (0).
+def emitted_masks(cache: dict, names: list[str], conf: float, grow: int, min_area: int,
+                  size: int = PRED_SIZE) -> np.ndarray:
+    """(N, size, size) uint8: the filaments the rule emits for each photo (1) over background (0).
 
     Same emission as evaluate_thresholds: candidates at or above conf, eroded when grow < 0, painted without overlap,
-    pieces under min_area dropped. Reduced to PRED_SIZE by block maximum, so thin filaments stay visible."""
+    pieces under min_area dropped. A size below 2048 reduces by block maximum, so thin filaments stay visible."""
     import cv2
     from pycocotools import mask as mu
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    out = np.zeros((len(names), PRED_SIZE, PRED_SIZE), np.uint8)
+    out = np.zeros((len(names), size, size), np.uint8)
     for i, name in enumerate(names):
         candidates = []
         for entry in cache[name]:
@@ -45,8 +46,8 @@ def emitted_masks(cache: dict, names: list[str], conf: float, grow: int, min_are
         for _, mask, _ in paint_panoptic(candidates, min_area=min_area):
             union = mask if union is None else union | mask
         if union is not None:
-            f = union.shape[0] // PRED_SIZE
-            out[i] = union[:f * PRED_SIZE, :f * PRED_SIZE].reshape(PRED_SIZE, f, PRED_SIZE, f).max((1, 3))
+            f = union.shape[0] // size
+            out[i] = union[:f * size, :f * size].reshape(size, f, size, f).max((1, 3))
     return out
 
 

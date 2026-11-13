@@ -27,13 +27,18 @@ Where things go (output_directory/models = FILAMENT_MODELS):
         weightslab.json                       the run's UI address and ports
     Experiment name: {model}-f{fold}.
 
-The data WeightsLab shows are the 707 training photos: the original photo, its ground truth as a 256 px mask with two
-classes (filament = drawn by at least one annotator, background), and, for held-out photos, the model's prediction in the
-same two classes once an evaluation has run (see src/models/mask2former/train.py). Photos are registered as two splits,
+The data WeightsLab shows are the 707 training photos at full resolution (2048 px, also in the zoomed view): the
+original photo, its ground truth as a 2048 px mask with two classes (filament = drawn by at least one annotator,
+background), and the model's prediction in the same two classes: for held-out photos at every evaluation, for any photo
+on request (pause, then Evaluate a split in the UI; see `on_evaluate`). Photos are registered as two splits,
 fold{k}_train and fold{k}_val, and carry the categorical tag fold{k} = train | val.
 
 Masks are handed to WeightsLab as uint16. WeightsLab 2.0.3 stores any other integer mask as uint16 marked "normalized"
 without rescaling it, then rescales it on reading (value / 65535 x max), which turns a 0/1 mask into zeros.
+
+Sample ids: WeightsLab hashes the first element of each sample (here the full-resolution photo) into its id, so a photo
+gets the same id in every run on the same machine. Each run also writes models/{model}-f{fold}/weightslab_ids.json
+({photo: id}); the global view matches runs through those files, by photo name.
 
 Ports: run number r = position of (model, fold) in RUNS; UI http://localhost:{8100 + r}, gRPC 50100 + r. A busy port
 falls back to a free one; the address used is printed and written to weightslab.json.
@@ -53,6 +58,7 @@ import os
 import random
 import socket
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -64,7 +70,8 @@ from src import paths
 MODEL_ORDER = ("mask2former", "mask2former_limb", "maskrcnn", "unet_cnx", "unet_cnxL", "unet_r34",
                "roi_detector", "roi_refiner")
 SLOTS_PER_MODEL = 6                                   # folds 0-4 and the full-data run
-MASK_SIZE = 256
+MASK_SIZE = 256                                       # thumbnails (also the source of the WeightsLab sample ids)
+FULL_SIZE = 2048                                      # ground truth and predictions shown in the UI
 CLASS_NAMES = ["background", "filament"]
 
 
@@ -169,6 +176,7 @@ def _build_photo_bank(target: Path) -> None:
         for record in records[name]:
             count += _decode_record(by_record[record["id"]], h, w)
             filaments.append(len(by_record[record["id"]]))
+        full = np.packbits(count[:FULL_SIZE, :FULL_SIZE] > 0, axis=1)              # (2048, 256) bits
         thumb = cv2.resize(gray, (MASK_SIZE, MASK_SIZE), interpolation=cv2.INTER_AREA)
         # Block maximum keeps one-pixel-wide filaments visible after an 8x reduction.
         f = h // MASK_SIZE
@@ -176,14 +184,15 @@ def _build_photo_bank(target: Path) -> None:
         meta = {"file_name": name, "date": f"{name[0:4]}-{name[4:6]}-{name[6:8]}", "site": Path(name).stem[-2],
                 "annotators": len(records[name]), "filaments_per_annotator": round(float(np.mean(filaments)), 2) if filaments else 0.0,
                 "user_fold": int(user_fold.get(name, -1))}
-        return thumb, np.minimum(agreement, 3).astype(np.uint8), meta
+        return thumb, np.minimum(agreement, 3).astype(np.uint8), meta, full
 
     with ThreadPoolExecutor(16) as pool:
         rows = list(pool.map(one, names))
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.stem + f".{os.getpid()}.partial.npz")
     np.savez_compressed(partial, names=np.array(names), thumbs=np.stack([r[0] for r in rows]),
-                        masks=np.stack([r[1] for r in rows]), meta=np.array(json.dumps([r[2] for r in rows])))
+                        masks=np.stack([r[1] for r in rows]), meta=np.array(json.dumps([r[2] for r in rows])),
+                        full=np.stack([r[3] for r in rows]))
     partial.replace(target)
 
 
@@ -191,7 +200,7 @@ class PhotoBank:
     """Thumbnails, annotator-agreement masks and metadata of the training photos, cached in work/weightslab/."""
 
     def __init__(self):
-        target = paths.WORK / "weightslab" / f"photos_{MASK_SIZE}.npz"
+        target = paths.WORK / "weightslab" / f"photos_{MASK_SIZE}_{FULL_SIZE}.npz"
         if not target.is_file():
             lock = target.with_suffix(".lock")
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -210,16 +219,25 @@ class PhotoBank:
                     _build_photo_bank(target)
         z = np.load(target)
         self.names = [str(n) for n in z["names"]]
-        self.thumbs, self.masks = z["thumbs"], z["masks"]
+        self.thumbs, self.masks, self.full = z["thumbs"], z["masks"], z["full"]
         self.meta = json.loads(str(z["meta"]))
         self.row = {n: i for i, n in enumerate(self.names)}
+
+    def ground_truth(self, row: int) -> np.ndarray:
+        """(2048, 2048) uint16: 1 where at least one annotator drew a filament (see the module docstring for uint16)."""
+        return np.unpackbits(self.full[row], axis=1).astype(np.uint16)
 
 
 def photo_view(bank: PhotoBank, names: list[str]):
     import torch
 
+    import cv2
+
     class PhotoView(torch.utils.data.Dataset):
-        """What WeightsLab shows: the original photo (`images`), the ground-truth mask, the photo's metadata."""
+        """What WeightsLab shows: the photo at full resolution, its ground-truth mask, its metadata.
+
+        WeightsLab reads the first element for display (grid and zoomed view) and to hash the sample id; get_items lets
+        it skip reading the photo when it only needs the label or the metadata."""
         task_type = "segmentation"
         num_classes = len(CLASS_NAMES)
         class_names = CLASS_NAMES
@@ -232,11 +250,15 @@ def photo_view(bank: PhotoBank, names: list[str]):
         def __len__(self):
             return len(self.rows)
 
-        def __getitem__(self, i):
+        def get_items(self, i, include_metadata=True, include_labels=True, include_images=True):
             r = self.rows[i]
-            # The thumbnail is also what WeightsLab hashes into the sample id, so a photo has the same id in every run.
-            # Ground truth: filament where any annotator drew one; uint16 (see the module docstring).
-            return bank.thumbs[r], self.names[i], (bank.masks[r] > 0).astype(np.uint16), dict(bank.meta[r])
+            photo = cv2.imread(self.images[i], cv2.IMREAD_GRAYSCALE) if include_images else None
+            # Ground truth at full resolution: filament where any annotator drew one; uint16 (see the module docstring).
+            target = bank.ground_truth(r) if include_labels else None
+            return photo, self.names[i], target, (dict(bank.meta[r]) if include_metadata else {})
+
+        def __getitem__(self, i):
+            return self.get_items(i)
 
     return PhotoView()
 
@@ -253,6 +275,7 @@ def quiet_environment() -> None:
     os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
     os.environ.setdefault("WEIGHTSLAB_PROJECTION", "0")
     os.environ.setdefault("ENABLE_HYPERPARAMETERS_OPTIMIZATION", "0")
+    os.environ.setdefault("WL_MODAL_MAX_RESOLUTION", str(FULL_SIZE))   # zoomed view: the photo at full resolution
     if os.environ.get("FILAMENT_WL_KERNEL", "0") != "1":
         os.environ.setdefault("WEIGHTSLAB_DISABLE_EMBEDDED_KERNEL", "1")
 
@@ -265,6 +288,8 @@ def say(line: str) -> None:
 
 def _free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # SO_REUSEADDR: a port left in TIME_WAIT by a run that just ended (a restart) is free for the servers too.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("0.0.0.0", port))
             return True
@@ -310,6 +335,9 @@ class _Off:
     def samples(self, step, names, signals, preds=None):
         pass
 
+    def on_evaluate(self, predict):
+        pass
+
     def close(self):
         pass
 
@@ -335,6 +363,8 @@ class Session:
 
         bank = PhotoBank()
         self.uid = {}
+        self._step_lock = threading.Lock()
+        self._last_step = 0
         for names, origin, training in ((train_names, f"{split}_train", True), (val_names, f"{split}_val", False)):
             if not names:
                 continue
@@ -350,6 +380,7 @@ class Session:
                 wl.set_categorical_tag(ids, f"fold{fold}", "train" if training else "val")
         if fold >= 0:
             wl.register_categorical_tag(f"fold{fold}", ["train", "val"])
+        (self.out_dir / "weightslab_ids.json").write_text(json.dumps(self.uid, indent=0))
 
         ui_pref, grpc_pref = preferred_ports(model, fold)
         self.grpc_port = _pick(grpc_pref)
@@ -383,8 +414,29 @@ class Session:
         if caught:
             raise caught[0]
 
+    @contextlib.contextmanager
     def train_step(self):
-        return self._guard(self.wl.guard_training_context)
+        # The step lock keeps an evaluation requested from the UI (run by WeightsLab on another thread) between steps.
+        with self._step_lock, self._guard(self.wl.guard_training_context):
+            yield
+
+    def on_evaluate(self, predict) -> None:
+        """Serve the UI's Evaluate button: predict(names) -> ((N, H, W) masks 0/1, {signal: N values}) for the photos
+        of the requested split (and tags). It runs between two training steps; training waits until it is done."""
+        name_of = {u: n for n, u in self.uid.items()}
+
+        @self.wl.eval_fn
+        def _evaluate(loader):
+            for batch in loader:
+                ids = [str(i) for i in (batch[1] if isinstance(batch, (list, tuple)) and len(batch) > 1 else [])]
+                names = [name_of[i] for i in ids if i in name_of]
+                if not names:
+                    continue
+                with self._step_lock:
+                    masks, signals = predict(names)
+                self.wl.save_signals(signals={k: np.asarray(v, np.float32) for k, v in signals.items()},
+                                     batch_ids=[self.uid[n] for n in names], preds=np.asarray(masks, np.uint16),
+                                     step=self._last_step, log=True)
 
     @contextlib.contextmanager
     def evaluation(self):
@@ -403,6 +455,7 @@ class Session:
 
     def log(self, step: int, **scalars) -> None:
         """Scalar curves; names may hold '/' (train/loss)."""
+        self._last_step = int(step)
         try:
             lg = self._logger()
             for name, value in scalars.items():
