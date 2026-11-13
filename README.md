@@ -89,6 +89,7 @@ src/
 configs/            model and data settings
 data/folds.json     the 5 folds (photos and annotations are downloaded)
 reference/          checksums, download sources, the submitted file's SHA-256, epoch table, figures
+report/             the competition report (LaTeX, first draft)
 models/  work/  outputs/  downloads/     created by the notebook (git-ignored)
 ```
 
