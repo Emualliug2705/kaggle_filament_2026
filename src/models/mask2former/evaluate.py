@@ -8,9 +8,11 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from src.evaluation.sweep import evaluate_thresholds, records_for
+from src.utils.masks import paint_panoptic
 from src.models.mask2former.data import read_gray
 from src.models.mask2former.model import build_model, predict_photograph
 
@@ -18,6 +20,34 @@ BASELINE_PQ = 0.4558638687292126          # parity check: PQ of a stored referen
 REFERENCE_PQ = 0.46814553                 # an earlier best validation PQ, reported next to each sweep
 CONFS = tuple(round(0.05 * i, 2) for i in range(1, 20))
 EMISSION = [(grow, area) for grow in (0, -1) for area in (100, 300)]
+PRED_SIZE = 256                          # side of the prediction masks written for WeightsLab
+
+
+def emitted_masks(cache: dict, names: list[str], conf: float, grow: int, min_area: int) -> np.ndarray:
+    """(N, PRED_SIZE, PRED_SIZE) uint8: the filaments the rule emits for each photo (1) over background (0).
+
+    Same emission as evaluate_thresholds: candidates at or above conf, eroded when grow < 0, painted without overlap,
+    pieces under min_area dropped. Reduced to PRED_SIZE by block maximum, so thin filaments stay visible."""
+    import cv2
+    from pycocotools import mask as mu
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    out = np.zeros((len(names), PRED_SIZE, PRED_SIZE), np.uint8)
+    for i, name in enumerate(names):
+        candidates = []
+        for entry in cache[name]:
+            if entry["score"] < conf:
+                continue
+            mask = mu.decode(entry["rle"])
+            if grow < 0:
+                mask = cv2.erode(mask, kernel, iterations=-grow)
+            candidates.append((entry["score"], mask))
+        union = None
+        for _, mask, _ in paint_panoptic(candidates, min_area=min_area):
+            union = mask if union is None else union | mask
+        if union is not None:
+            f = union.shape[0] // PRED_SIZE
+            out[i] = union[:f * PRED_SIZE, :f * PRED_SIZE].reshape(PRED_SIZE, f, PRED_SIZE, f).max((1, 3))
+    return out
 
 
 def event(tag: str, log: Path | None = None, **payload) -> None:
@@ -135,6 +165,9 @@ def main() -> None:
                                         grow=best["grow"], min_area=best["min_area"])[0]
               for name in (names or sorted(records))}
     (args.output / f"{args.tag}_photos.json").write_text(json.dumps(photos))
+    order = names or sorted(records)
+    np.savez_compressed(args.output / f"{args.tag}_pred{PRED_SIZE}.npz", names=np.array(order),
+                        masks=emitted_masks(cache, order, best["conf"], best["grow"], best["min_area"]))
     (args.output / f"{args.tag}_sweep.json").write_text(json.dumps(report, indent=2))
     event("EVAL", args.log, run=args.tag, d4=args.d4, best=rows[0],
           photographs=report["photographs"], sweep_seconds=report["sweep_seconds"])

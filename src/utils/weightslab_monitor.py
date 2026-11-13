@@ -27,9 +27,13 @@ Where things go (output_directory/models = FILAMENT_MODELS):
         weightslab.json                       the run's UI address and ports
     Experiment name: {model}-f{fold}.
 
-The data WeightsLab shows are the 707 training photos: the original photo, and a 256 px mask whose value is the number
-of annotators who drew a filament on that pixel (0-3). Photos are registered as two splits, fold{k}_train and fold{k}_val,
-and carry the categorical tag fold{k} = train | val.
+The data WeightsLab shows are the 707 training photos: the original photo, its ground truth as a 256 px mask with two
+classes (filament = drawn by at least one annotator, background), and, for held-out photos, the model's prediction in the
+same two classes once an evaluation has run (see src/models/mask2former/train.py). Photos are registered as two splits,
+fold{k}_train and fold{k}_val, and carry the categorical tag fold{k} = train | val.
+
+Masks are handed to WeightsLab as uint16. WeightsLab 2.0.3 stores any other integer mask as uint16 marked "normalized"
+without rescaling it, then rescales it on reading (value / 65535 x max), which turns a 0/1 mask into zeros.
 
 Ports: run number r = position of (model, fold) in RUNS; UI http://localhost:{8100 + r}, gRPC 50100 + r. A busy port
 falls back to a free one; the address used is printed and written to weightslab.json.
@@ -61,7 +65,7 @@ MODEL_ORDER = ("mask2former", "mask2former_limb", "maskrcnn", "unet_cnx", "unet_
                "roi_detector", "roi_refiner")
 SLOTS_PER_MODEL = 6                                   # folds 0-4 and the full-data run
 MASK_SIZE = 256
-CLASS_NAMES = ["background", "1 annotator", "2 annotators", "3 annotators"]
+CLASS_NAMES = ["background", "filament"]
 
 
 def experiment_name(model: str, fold: int) -> str:
@@ -215,7 +219,7 @@ def photo_view(bank: PhotoBank, names: list[str]):
     import torch
 
     class PhotoView(torch.utils.data.Dataset):
-        """What WeightsLab shows: the original photo (`images`), the agreement mask, the photo's metadata."""
+        """What WeightsLab shows: the original photo (`images`), the ground-truth mask, the photo's metadata."""
         task_type = "segmentation"
         num_classes = len(CLASS_NAMES)
         class_names = CLASS_NAMES
@@ -231,7 +235,8 @@ def photo_view(bank: PhotoBank, names: list[str]):
         def __getitem__(self, i):
             r = self.rows[i]
             # The thumbnail is also what WeightsLab hashes into the sample id, so a photo has the same id in every run.
-            return bank.thumbs[r], self.names[i], bank.masks[r], dict(bank.meta[r])
+            # Ground truth: filament where any annotator drew one; uint16 (see the module docstring).
+            return bank.thumbs[r], self.names[i], (bank.masks[r] > 0).astype(np.uint16), dict(bank.meta[r])
 
     return PhotoView()
 
@@ -302,7 +307,7 @@ class _Off:
     def log(self, step, **scalars):
         pass
 
-    def samples(self, step, names, signals):
+    def samples(self, step, names, signals, preds=None):
         pass
 
     def close(self):
@@ -408,17 +413,19 @@ class Session:
         except Exception:                                # monitoring never stops a training run
             traceback.print_exc()
 
-    def samples(self, step: int, names, signals: dict) -> None:
+    def samples(self, step: int, names, signals: dict, preds=None) -> None:
         """Per-photo signals: names[i] is the photo the i-th value of every signal belongs to. Each signal is also
         plotted as its mean over these photos. Call it inside train_step() for training values and inside
-        evaluation() for held-out ones."""
+        evaluation() for held-out ones. preds: optional (N, H, W) masks (0 background, 1 filament), shown over the
+        photos in the UI."""
         try:
             keep = [i for i, n in enumerate(names) if n in self.uid]
             if not keep:
                 return
             ids = [self.uid[names[i]] for i in keep]
             values = {k: np.asarray(v, dtype=np.float32).reshape(len(names))[keep] for k, v in signals.items()}
-            self.wl.save_signals(signals=values, batch_ids=ids, step=int(step), log=True)
+            masks = None if preds is None else np.asarray(preds, dtype=np.uint16)[keep]
+            self.wl.save_signals(signals=values, batch_ids=ids, step=int(step), log=True, preds=masks)
         except Exception:
             traceback.print_exc()
 

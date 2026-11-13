@@ -133,9 +133,12 @@ pip install -r env/requirements-weightslab.txt      # after the Setup install; W
 * On a remote GPU machine, forward the ports: `ssh -N -L 8100:localhost:8100 -L 8101:localhost:8101 ... user@host`.
 
 What each fold's UI shows (experiment `{family}-f{K}`, folder `models/{family}-f{K}/`):
-* **Data**: the 707 training photos, split as `fold{K}_train` and `fold{K}_val` and tagged `fold{K}` = train | val.
-  Each photo shows with an overlay counting the annotators who drew a filament on each pixel (0-3), plus its site,
-  date, annotator count and user fold.
+* **Data**: the 707 training photos, split as `fold{K}_train` and `fold{K}_val` and tagged `fold{K}` = train | val, with
+  two masks over each photo, in two classes (filament / background):
+  * Ground truth: filament where at least one annotator drew one.
+  * Prediction: held-out photos only. The filaments emitted at the latest 5-epoch evaluation under its best rule; none
+    before the first evaluation. Training photos have none: training sees crops, never whole-photo predictions.
+  * Columns: site, date, annotator count, user fold.
 * **Curves**:
   * `train/loss` with its cross-entropy, mask and Dice terms, plus learning rate and epoch, every step.
   * `val/pq` (pooled PQ of the best emission rule), plus `val/sq`, `val/rq` and the chosen threshold, at every
@@ -157,7 +160,8 @@ python -m src.training.weightslab_global            # http://localhost:8099, Ctr
 It reads every run under `models/` (never modifies them; a run still training is read from a copy) and rebuilds
 `models/_weightslab_global/`:
 * **All curves**, one per fold.
-* **The 707 photos once**, with tags `fold0` … `fold4` = train | val.
+* **The 707 photos once**, with tags `fold0` … `fold4` = train | val, ground truth, and each photo's out-of-fold
+  prediction (latest evaluation of the fold that held it out).
 * **Per-family per-photo columns**:
   * `{family}/oof_pq`, `oof_tp`, `oof_fp`, `oof_fn`: from the one fold that held the photo out, at its last
     evaluation.

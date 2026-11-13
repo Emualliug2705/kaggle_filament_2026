@@ -361,6 +361,24 @@ def main() -> int:
             best = report["best"]
             photos_path = args.output / f"e{epoch_number:03d}_photos.json"
             photos = json.loads(photos_path.read_text()) if photos_path.is_file() else {}
+            preds = None
+            if photos:
+                # Each held-out photo's emitted prediction under the best rule (written by the sweep; rebuilt here from
+                # the candidate cache for evaluations that ran before the sweep wrote it).
+                from src.models.mask2former.evaluate import PRED_SIZE, emitted_masks
+                pred_path = args.output / f"e{epoch_number:03d}_pred{PRED_SIZE}.npz"
+                cache_path = args.output / f"e{epoch_number:03d}_cache.json"
+                if pred_path.is_file():
+                    z = np.load(pred_path)
+                    by_name = dict(zip([str(n) for n in z["names"]], z["masks"]))
+                elif cache_path.is_file():
+                    order = sorted(photos)
+                    by_name = dict(zip(order, emitted_masks(json.loads(cache_path.read_text()), order, best["conf"],
+                                                            best["grow"], best["min_area"])))
+                else:
+                    by_name = {}
+                if by_name and all(n in by_name for n in photos):
+                    preds = np.stack([by_name[n] for n in sorted(photos)])
             with monitor.evaluation():
                 monitor.log(at, **{"val/pq": best["pq"], "val/sq": best["sq"], "val/rq": best["rq"],
                                    "val/conf": best["conf"], "val/epoch": epoch_number})
@@ -369,7 +387,7 @@ def main() -> int:
                     monitor.samples(at, names, {"val/photo_pq": [photos[n]["pq"] for n in names],
                                                 "val/photo_tp": [photos[n]["tp"] for n in names],
                                                 "val/photo_fp": [photos[n]["fp"] for n in names],
-                                                "val/photo_fn": [photos[n]["fn"] for n in names]})
+                                                "val/photo_fn": [photos[n]["fn"] for n in names]}, preds=preds)
 
     def evaluate_now(epoch_number: int) -> None:
         eval_steps[epoch_number] = step

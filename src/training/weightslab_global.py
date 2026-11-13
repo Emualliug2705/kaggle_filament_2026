@@ -12,6 +12,8 @@ What it shows
                                  (val/photo_{signal} at the run's last evaluation)
         {model}/train_{signal}   the training value, averaged over the four runs that trained on the photo
                                  (train/photo_{signal} averaged over each run's last 10 % of steps)
+    Masks: ground truth (filament / background) and the out-of-fold prediction: the emitted masks of the latest
+        evaluation of the fold that held the photo out (family --pred-family, default mask2former).
     Per-photo trajectories of every run stay available, under the run's experiment.
 
 The runs are only read. The global view is rebuilt from them at each start in models/_weightslab_global/ (a run that is
@@ -121,7 +123,20 @@ def per_photo_columns(sources: dict) -> dict:
     return out
 
 
-def serve(models: Path, ui_port: int, grpc_port: int) -> None:
+def oof_predictions(runs: list[Path], family: str) -> dict:
+    """{photo: mask} from the latest e###_pred256.npz of each fold of `family` (its held-out photos)."""
+    out = {}
+    for run in runs:
+        model, fold = run_identity(run)
+        files = sorted(run.glob("e[0-9][0-9][0-9]_pred256.npz"))
+        if model != family or fold < 0 or not files:
+            continue
+        z = np.load(files[-1])
+        out.update(zip([str(n) for n in z["names"]], z["masks"]))
+    return out
+
+
+def serve(models: Path, ui_port: int, grpc_port: int, pred_family: str = "mask2former") -> None:
     root = models / GLOBAL
     shutil.rmtree(root, ignore_errors=True)                   # rebuilt from the runs at every start
     root.mkdir(parents=True)
@@ -176,6 +191,13 @@ def serve(models: Path, ui_port: int, grpc_port: int) -> None:
         if sids:
             wl.save_signals(signals={column: np.array([values[s] for s in sids], np.float32)}, batch_ids=sids, step=0,
                             log=False)
+    preds = oof_predictions(runs, pred_family)
+    if preds:
+        names = [n for n in view.names if n in preds]
+        wl.save_signals(signals={f"{pred_family}/oof_pred_pixels": np.array([preds[n].sum() for n in names], np.float32)},
+                        batch_ids=[uid[n] for n in names], preds=np.stack([preds[n] for n in names]).astype(np.uint16),
+                        step=0, log=False)
+    print(f"  out-of-fold prediction masks ({pred_family}): {len(preds)} photos", flush=True)
     wl.drain_signals()
     print(f"  per-photo columns: {len(columns)} ({', '.join(sorted(columns)[:6])}{' ...' if len(columns) > 6 else ''})",
           flush=True)
@@ -205,10 +227,11 @@ def main() -> None:
     a.add_argument("--list", action="store_true", help="list the runs and their UI addresses, then exit")
     a.add_argument("--port", type=int, default=8099)
     a.add_argument("--grpc-port", type=int, default=50099)
+    a.add_argument("--pred-family", default="mask2former", help="whose out-of-fold prediction masks are shown")
     args = a.parse_args()
     if args.list:
         return list_runs(args.models)
-    serve(args.models.resolve(), args.port, args.grpc_port)
+    serve(args.models.resolve(), args.port, args.grpc_port, args.pred_family)
 
 
 if __name__ == "__main__":
