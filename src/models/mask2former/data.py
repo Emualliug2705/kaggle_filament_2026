@@ -405,15 +405,15 @@ class FilamentSamples(Dataset):
         return (torch.from_numpy(np.ascontiguousarray(patch)),
                 torch.from_numpy(np.ascontiguousarray(stack)),
                 torch.zeros(len(stack), dtype=torch.long), (bool(last), int(parts), int(extent)),
-                photometric)
+                photometric, record["file_name"])
 
 
 def collate(batch):
     """Stack uint8 images; masks and classes stay lists, as Mask2Former's loss expects.
 
-    Returns (pixels uint8 [B, H, W], masks, classes, step metadata, photometric list).
+    Returns (pixels uint8 [B, H, W], masks, classes, step metadata, photometric list, photo names).
     The step metadata (last, parts, extent) is shared by every sample of a micro-batch.
     """
     pixels = torch.stack([item[0] for item in batch])
     return (pixels, [item[1] for item in batch], [item[2] for item in batch], batch[0][3],
-            [item[4] for item in batch])
+            [item[4] for item in batch], [item[5] for item in batch])

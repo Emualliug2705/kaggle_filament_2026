@@ -1,6 +1,7 @@
 """U-Net training (2 outputs: filament probability, spine): random 512 px crops around filament centres, D4 and
 intensity augmentation, BCE + 0.5 Dice + 0.3 spine BCE, AdamW with warm-up and cosine decay, EMA weights (ema.pt).
-The photos whose meta fold equals --fold are held out.
+The photos whose meta fold equals --fold are held out. WeightsLab (src.utils.weightslab_monitor) receives the loss curves,
+each crop's loss on its photo, and a held-out pass of the EMA weights every FILAMENT_WL_EVAL_EVERY steps (default 2000).
 
     python -m src.training.train_unet --name unet_cnx-f0 --fold 0 --arch unet --encoder tu-convnext_tiny --steps 24000 \
         --cache DIR --runs models"""
@@ -19,6 +20,7 @@ import torch.nn.functional as F
 
 from src import paths
 from src.models.unet import build_model, normalize
+from src.utils import weightslab_monitor
 
 CACHE = str(paths.WORK / 'train_cache')
 
@@ -72,13 +74,70 @@ class Crops(torch.utils.data.Dataset):
         x = normalize(img, m['disk_mean'], m['disk_std'])
         x = x * rng.uniform(0.85, 1.15) + rng.uniform(-0.15, 0.15)
         y = np.stack([soft, sp]).astype(np.float32) / 255
-        return torch.from_numpy(np.ascontiguousarray(x[None])), torch.from_numpy(np.ascontiguousarray(y))
+        # i (the photo) only labels the crop for WeightsLab; it takes no part in the sampling above.
+        return torch.from_numpy(np.ascontiguousarray(x[None])), torch.from_numpy(np.ascontiguousarray(y)), i
 
 
 def dice_loss(logit, target):
     p = torch.sigmoid(logit)
     inter = (p * target).sum((1, 2)); den = (p + target).sum((1, 2))
     return (1 - (2 * inter + 1) / (den + 1)).mean()
+
+
+@torch.no_grad()
+def loss_terms(o, y):
+    """Per-crop terms of the training loss (B,) each: BCE, Dice loss, spine BCE, total. Monitoring only."""
+    o = o.detach().float()
+    bce = F.binary_cross_entropy_with_logits(o[:, 0], y[:, 0], reduction='none').mean((1, 2))
+    p = torch.sigmoid(o[:, 0])
+    dice = 1 - (2 * (p * y[:, 0]).sum((1, 2)) + 1) / ((p + y[:, 0]).sum((1, 2)) + 1)
+    spine = F.binary_cross_entropy_with_logits(o[:, 1], y[:, 1], reduction='none').mean((1, 2))
+    return bce, dice, spine, bce + 0.5 * dice + 0.3 * spine
+
+
+class HeldOut:
+    """Fixed 512 px crops of the held-out photos (the first two filament centres, else the disk centre), no augmentation."""
+
+    def __init__(self, idx, meta, crop, cache):
+        with open(os.path.join(cache, 'centers.json'), encoding='utf-8') as fh:
+            ann = json.load(fh)
+        self.meta, self.crop = meta, crop
+        self.items = [(i, c) for i in idx for c in (ann[str(i)][:2] or [(1024, 1024)])]
+        self.mm = {k: np.load(os.path.join(cache, f'train_{k}.npy'), mmap_mode='r') for k in ('img', 'soft', 'spine')}
+
+    def batches(self, size=8):
+        C = self.crop
+        for s in range(0, len(self.items), size):
+            xs, ys, photos = [], [], []
+            for i, (cx, cy) in self.items[s:s + size]:
+                x0 = min(max(int(round(cx)) - C // 2, 0), 2048 - C); y0 = min(max(int(round(cy)) - C // 2, 0), 2048 - C)
+                sl = (i, slice(y0, y0 + C), slice(x0, x0 + C))
+                m = self.meta[i]
+                xs.append(normalize(np.asarray(self.mm['img'][sl]), m['disk_mean'], m['disk_std'])[None])
+                ys.append(np.stack([np.asarray(self.mm['soft'][sl]), np.asarray(self.mm['spine'][sl])]).astype(np.float32) / 255)
+                photos.append(i)
+            yield torch.from_numpy(np.stack(xs)), torch.from_numpy(np.stack(ys)), photos
+
+
+def held_out_pass(monitor, net, held, meta, step, dev):
+    """Held-out loss and Dice per photo for the weights that are saved (EMA). Training state is untouched."""
+    sums = {}
+    with weightslab_monitor.preserve_rng(), weightslab_monitor.preserve_modes(net), torch.no_grad():
+        net.eval()
+        for x, y, photos in held.batches():
+            x = x.to(dev).to(memory_format=torch.channels_last); y = y.to(dev)
+            with torch.autocast('cuda', dtype=torch.bfloat16):
+                o = net(x).float()
+            bce, dice, spine, total = loss_terms(o, y)
+            hard = ((torch.sigmoid(o[:, 0]) > 0.5).float(), (y[:, 0] > 0.5).float())
+            dice_score = (2 * (hard[0] * hard[1]).sum((1, 2)) + 1) / (hard[0].sum((1, 2)) + hard[1].sum((1, 2)) + 1)
+            for j, i in enumerate(photos):
+                acc = sums.setdefault(meta[i]['file_name'], np.zeros(4))
+                acc += [float(total[j]), float(dice_score[j]), float(spine[j]), 1.0]
+    names = sorted(sums)
+    per = np.array([sums[n][:3] / sums[n][3] for n in names])
+    with monitor.evaluation():
+        monitor.samples(step, names, {'val/photo_loss': per[:, 0], 'val/photo_dice': per[:, 1], 'val/photo_spine_bce': per[:, 2]})
 
 
 def train(a):
@@ -89,6 +148,11 @@ def train(a):
     rec = {k: v for k, v in vars(a).items() if k not in ('cache', 'runs', 'config')}
     with open(os.path.join(out, 'args.json'), 'w', encoding='utf-8') as fh:
         json.dump(rec | {'n_train_images': len(idx)}, fh, indent=1)
+    held_idx = [i for i, m in enumerate(meta) if m['fold'] == a.fold]
+    monitor = weightslab_monitor.start(a.name.rsplit('-f', 1)[0], a.fold, out, rec,
+                                       [meta[i]['file_name'] for i in idx], [meta[i]['file_name'] for i in held_idx])
+    eval_every = int(os.environ.get('FILAMENT_WL_EVAL_EVERY', 2000))
+    held = HeldOut(held_idx, meta, a.crop, a.cache) if monitor.active and held_idx else None
     torch.manual_seed(a.seed)
     dev = 'cuda'
     model = build_model(a.arch, a.encoder).to(dev).to(memory_format=torch.channels_last)
@@ -101,24 +165,32 @@ def train(a):
     dl = torch.utils.data.DataLoader(ds, batch_size=a.bs, num_workers=a.workers, persistent_workers=True, prefetch_factor=4)
     t0 = time.time(); log = open(os.path.join(out, 'log.txt'), 'a', encoding='utf-8')
     model.train()
-    for step, (x, y) in enumerate(dl, 1):
-        f = step / a.warmup if step < a.warmup else 0.01 + 0.99 * 0.5 * (1 + math.cos(math.pi * (step - a.warmup) / (a.steps - a.warmup)))
-        for g, b in zip(opt.param_groups, base):
-            g['lr'] = b * f
-        x = x.to(dev, non_blocking=True).to(memory_format=torch.channels_last); y = y.to(dev, non_blocking=True)
-        with torch.autocast('cuda', dtype=torch.bfloat16):
-            o = model(x).float()
-        loss = F.binary_cross_entropy_with_logits(o[:, 0], y[:, 0]) + 0.5 * dice_loss(o[:, 0], y[:, 0]) \
-            + 0.3 * F.binary_cross_entropy_with_logits(o[:, 1], y[:, 1])
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step(); ema.update_parameters(model)
+    for step, (x, y, photo) in enumerate(dl, 1):
+        with monitor.train_step():                        # the UI's pause button holds training here
+            f = step / a.warmup if step < a.warmup else 0.01 + 0.99 * 0.5 * (1 + math.cos(math.pi * (step - a.warmup) / (a.steps - a.warmup)))
+            for g, b in zip(opt.param_groups, base):
+                g['lr'] = b * f
+            x = x.to(dev, non_blocking=True).to(memory_format=torch.channels_last); y = y.to(dev, non_blocking=True)
+            with torch.autocast('cuda', dtype=torch.bfloat16):
+                o = model(x).float()
+            loss = F.binary_cross_entropy_with_logits(o[:, 0], y[:, 0]) + 0.5 * dice_loss(o[:, 0], y[:, 0]) \
+                + 0.3 * F.binary_cross_entropy_with_logits(o[:, 1], y[:, 1])
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step(); ema.update_parameters(model)
+            if monitor.active:
+                bce, dice, spine, total = (t.cpu().numpy() for t in loss_terms(o, y))
+                monitor.log(step, **{'train/loss': float(loss.detach()), 'train/bce': bce.mean(), 'train/dice_loss': dice.mean(),
+                                     'train/spine_bce': spine.mean(), 'train/lr_decoder': opt.param_groups[1]['lr']})
+                monitor.samples(step, [meta[int(i)]['file_name'] for i in photo], {'train/photo_loss': total})
         if step % 200 == 0:
             msg = f'step {step} loss {loss.item():.4f} lr {f:.3f} {(time.time()-t0)/step:.3f}s/it mem {torch.cuda.max_memory_allocated()/2**30:.2f}G'
             print(msg, flush=True); log.write(msg + '\n'); log.flush()
         if step % 5000 == 0 or step == a.steps:
             torch.save(ema.module.state_dict(), os.path.join(out, 'ema.pt'))
+        if held is not None and (step % eval_every == 0 or step == a.steps):
+            held_out_pass(monitor, ema.module, held, meta, step, dev)
     log.close()
     with open(os.path.join(out, 'done.json'), 'w', encoding='utf-8') as fh:
         json.dump({'done': True, 'sec': time.time() - t0}, fh)
@@ -147,4 +219,4 @@ def parse(argv=None):
 
 
 if __name__ == '__main__':
-    train(parse())
+    weightslab_monitor.run_main(lambda: train(parse()))

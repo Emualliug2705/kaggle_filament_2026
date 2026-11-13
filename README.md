@@ -107,6 +107,82 @@ jupyter lab PIPELINE.ipynb          # run all cells; or headless: python run_hea
   repository on a normal disk, not a `noexec` RAM disk. To move a folder, set `FILAMENT_DATA`, `FILAMENT_MODELS`, `FILAMENT_WORK`,
   `FILAMENT_SCRATCH`, `FILAMENT_OUTPUTS` or `FILAMENT_DOWNLOADS`.
 
+## v2: supervising the trainings with WeightsLab
+
+This branch (`v2-weightslab`) adds [WeightsLab](https://github.com/GrayboxTech/weightslab) to every training: each run serves
+its own web UI while it trains, and after training one command opens a single UI over all runs. **Training itself is
+unchanged**. WeightsLab never wraps the models, optimisers, losses or data loaders. It receives copies of the numbers the
+trainers already compute, and its start-up and the added held-out passes run with the random generators saved and
+restored. Checked with short runs of every model (fold 0) with WeightsLab on and off:
+* **U-Nets (cnx, cnxL, r34) and ROI refiner:** bit-identical weights.
+* **Mask2Former, Mask R-CNN and ROI detector:** these use GPU kernels whose backward pass is not deterministic
+  (deformable attention, RoIAlign). Two runs *without* WeightsLab differ from each other in the same tensors and by the
+  same amount as a run with it and one without (largest weight difference 7e-5, 6e-3 and 2e-4). Their first-step
+  losses are identical: 52.7831 (`mask2former`), 50.8787 (`mask2former_limb`) and 1.1265 (ROI detector), as in the
+  original trainings.
+
+```bash
+pip install -r env/requirements-weightslab.txt      # after the Setup install; WeightsLab 2.0.3 needs pandas < 3, Pillow < 12
+```
+
+**During training.** Launch the trainings as before (`src.training.mask2former`, `src.training.evidence_models train`,
+`src.training.train_roi`, or the notebook with `RETRAIN=1`). Each (model, fold) run prints
+`WEIGHTSLAB {model}-f{fold}: UI http://localhost:PORT` and writes the address to `models/{model}-f{fold}/weightslab.json`.
+The ports are fixed, so parallel runs never collide (a busy port falls back to a free one, and the printed address is the
+one used):
+
+| model | fold 0 | fold 1 | fold 2 | fold 3 | fold 4 | full data |
+|---|---|---|---|---|---|---|
+| `mask2former` | 8100 | 8101 | 8102 | 8103 | 8104 | 8105 |
+| `mask2former_limb` | 8106 | 8107 | 8108 | 8109 | 8110 | 8111 |
+| `maskrcnn` | 8112 | 8113 | 8114 | 8115 | 8116 | 8117 |
+| `unet_cnx` | 8118 | 8119 | 8120 | 8121 | 8122 | 8123 |
+| `unet_cnxL` | 8124 | 8125 | 8126 | 8127 | 8128 | 8129 |
+| `unet_r34` | 8130 | 8131 | 8132 | 8133 | 8134 | 8135 |
+| `roi_detector` | 8136 | 8137 | 8138 | 8139 | 8140 | 8141 |
+| `roi_refiner` | 8142 | 8143 | 8144 | 8145 | 8146 | 8147 |
+
+`python -m src.training.weightslab_global --list` shows every run, whether it is still training, and its address. On a
+remote GPU machine, forward the ports: `ssh -N -L 8100:localhost:8100 -L 8118:localhost:8118 ... user@host`.
+
+What each run's UI shows (experiment `{model}-f{fold}`, folder `models/{model}-f{fold}/`):
+* **Data**: the 707 training photos. They are split as `fold{k}_train` and `fold{k}_val` and tagged `fold{k}` = train | val.
+  Each photo shows with an overlay counting the annotators who drew a filament on each pixel (0-3), plus its site,
+  date, annotator count and user fold.
+* **Curves** `train/*`: the step loss and its terms, learning rate. `val/*`: held-out results. Mask2Former reports its
+  evaluation every 5 epochs: pooled PQ of the best emission rule, plus SQ, RQ and the threshold. The U-Nets, Mask R-CNN
+  and ROI models get a held-out loss pass every `FILAMENT_WL_EVAL_EVERY` steps (default 2000 U-Net, 1500 Mask R-CNN and
+  detector, 3000 refiner) on fixed crops of the held-out photos. That pass leaves the weights, BatchNorm statistics and
+  random generators untouched.
+* **Per-photo signals** `train/photo_*` (each crop's own loss, on its photo; Mask R-CNN gives only the batch loss) and
+  `val/photo_*` (Mask2Former: PQ, TP, FP, FN of each held-out photo; the others: held-out loss and its terms).
+* The pause button holds training between two steps. Hyperparameter inputs are read-only: the trainers do not read them
+  back.
+
+**After training: one UI over everything.**
+
+```bash
+python -m src.training.weightslab_global            # http://localhost:8099, Ctrl+C to stop
+```
+
+It reads every run under `models/` (never modifies them; a run still training is read from a copy) and rebuilds
+`models/_weightslab_global/`:
+* **All curves**, one per run.
+* **The 707 photos once**, with tags `fold0` … `fold4` = train | val.
+* **Per-model per-photo columns**, folds pooled:
+  * `{model}/oof_{signal}`: the held-out value, from the one run that did not train on the photo, e.g. `mask2former/oof_pq`.
+  * `{model}/train_{signal}`: the training loss, averaged over the four runs that trained on it (last 10 % of steps).
+* Every run's per-photo trajectories.
+
+A photo has the same WeightsLab id in every run and in the global view (a hash of its cached thumbnail,
+`work/weightslab/photos_256.npz`).
+
+Settings (environment): `FILAMENT_WEIGHTSLAB=0` turns it off (it is also off when the package is not installed);
+`FILAMENT_WL_UI_PORT` / `FILAMENT_WL_GRPC_PORT` move the port ranges (8100 / 50100); `FILAMENT_WL_HOST` (0.0.0.0);
+`FILAMENT_WL_LINGER=3600` keeps a finished run's UI up for an hour; `FILAMENT_WL_KERNEL=1` embeds WeightsLab's Jupyter
+kernel (off by default: it takes over Ctrl+C). WeightsLab's own variables (`WL_NO_TELEMETRY=1`, ...) apply as usual.
+Each run's folder grows by about 10 MB (WeightsLab's database, per-photo table and log).
+
 ## Layout
 
 ```
@@ -114,11 +190,12 @@ src/
   paths.py          every folder the pipeline uses (environment overrides)
   data/             folds and splits, photo utilities
   models/           mask2former/ (model, data, training loop, evaluation), maskrcnn.py, unet.py, roi/ (detector + refiner)
-  training/         launchers and trainers: mask2former.py, evidence_models.py, train_unet.py, train_maskrcnn.py, train_roi.py
+  training/         launchers and trainers: mask2former.py, evidence_models.py, train_unet.py, train_maskrcnn.py, train_roi.py;
+                    weightslab_global.py (one WeightsLab UI over every run)
   inference/        Mask2Former caches and views, two-family pools, ROI banks, view fusion
   scorer/           features + LightGBM + selection (selector.py), exact selection (select.py), boundary redraw
   evaluation/       out-of-fold matching and PQ, validation sweeps
-  utils/            masks, events
+  utils/            masks, events, weightslab_monitor.py (each training's WeightsLab session)
 configs/            model and data settings
 data/folds.json     the 5 folds (photos and annotations are downloaded)
 reference/          checksums, download sources, the submitted file's SHA-256, epoch table, figures

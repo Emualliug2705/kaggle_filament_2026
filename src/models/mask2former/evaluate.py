@@ -127,6 +127,14 @@ def main() -> None:
     report.update(sweep_seconds=round(time.time() - started, 1), best=rows[0], rows=rows,
                   photographs=len(names) if names else len(records),
                   reference=dict(earlier_best=REFERENCE_PQ))
+    # Per-photo counts of the best rule (read by the trainer for WeightsLab). Written before the sweep report, whose
+    # appearance tells the trainer the evaluation is complete.
+    best = rows[0]
+    cache = json.loads(Path(cache_path).read_text())
+    photos = {name: evaluate_thresholds({name: cache[name]}, {name: records[name]}, (best["conf"],),
+                                        grow=best["grow"], min_area=best["min_area"])[0]
+              for name in (names or sorted(records))}
+    (args.output / f"{args.tag}_photos.json").write_text(json.dumps(photos))
     (args.output / f"{args.tag}_sweep.json").write_text(json.dumps(report, indent=2))
     event("EVAL", args.log, run=args.tag, d4=args.d4, best=rows[0],
           photographs=report["photographs"], sweep_seconds=report["sweep_seconds"])

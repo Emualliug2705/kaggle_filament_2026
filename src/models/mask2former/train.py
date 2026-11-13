@@ -1,11 +1,15 @@
 """Mask2Former training on the user's folds: Swin-S from COCO instance weights, native-pixel crops and whole frames,
 transformers' own Mask2Former loss, batch 8 by gradient accumulation, 50 epochs annealed to zero, held-out
-evaluation every 5 epochs (validation caches and PQ sweeps next to the checkpoints). Resumable from last.pt."""
+evaluation every 5 epochs (validation caches and PQ sweeps next to the checkpoints). Resumable from last.pt.
+
+WeightsLab (src.utils.weightslab_monitor) receives the step loss and its three terms, each crop's own loss on its photo,
+and every finished evaluation: the pooled PQ of the best rule and each held-out photo's PQ, TP, FP and FN."""
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import os
 import queue
 import subprocess
 import sys
@@ -27,6 +31,7 @@ from src.models.mask2former.fast_ops import (install_batched_loss,
                                                           verify_deformable_kernel)
 from src.models.mask2former.model import (backbone_checkpointing, build_model,
                                                        parameter_groups, predict)
+from src.utils import weightslab_monitor
 
 
 def schedule(step: int, warmup: int, total: int) -> float:
@@ -161,14 +166,17 @@ def step_shares(classes, num_queries: int, eos: float) -> tuple[float, float]:
     return float(masks), float(weight)
 
 
-def step_losses(model, pending: list, device, args, captured: dict) -> float:
-    """Forward, scale and backward every micro-batch of one optimiser step."""
+def step_losses(model, pending: list, device, args, captured: dict, details: list | None = None) -> float:
+    """Forward, scale and backward every micro-batch of one optimiser step.
+
+    details (WeightsLab): receives, per micro-batch, (photo names, the micro-batch's own loss, its weighted share of
+    the step loss split into cross-entropy, mask and Dice terms)."""
     counts = [step_shares(classes, model.config.num_queries, model.config.no_object_weight)
-              for _, _, classes, _, _ in pending]
+              for _, _, classes, _, _, _ in pending]
     total_masks = max(1e-12, sum(count[0] for count in counts))
     total_weight = max(1e-12, sum(count[1] for count in counts))
     value = 0.0
-    for (pixels, masks, classes, photometric, extent), (micro_masks, micro_weight) in zip(pending, counts):
+    for (pixels, masks, classes, photometric, extent, names), (micro_masks, micro_weight) in zip(pending, counts):
         if args.checkpoint != "none":
             backbone_checkpointing(model, checkpoint_for(args.checkpoint, extent))
         pixels = gpu_pixels(pixels, photometric, device)
@@ -181,6 +189,12 @@ def step_losses(model, pending: list, device, args, captured: dict) -> float:
                    for key, term in captured["dict"].items())
         loss.backward()
         value += float(loss.detach())
+        if details is not None:
+            terms = captured["dict"]
+            group = lambda word: float(sum(t.detach() for k, t in terms.items() if word in k))  # noqa: E731
+            details.append((names, float(sum(t.detach() for t in terms.values())),
+                            {"cross_entropy": group("cross_entropy") * class_share,
+                             "mask": group("loss_mask") * mask_share, "dice": group("loss_dice") * mask_share}))
     return value
 
 
@@ -202,7 +216,7 @@ def memory_probe(args, model, optimiser, dataset, sampler, device, log) -> None:
         torch.cuda.reset_peak_memory_stats() if device.type == "cuda" else None
         for repeat in range(2):
             items = [dataset[(dense[j % len(dense)], extent, 0, j, True, 1)] for j in range(size)]
-            pixels, masks, classes, _, photometric = collate(items)
+            pixels, masks, classes, _, photometric, _ = collate(items)
             pixels = gpu_pixels(pixels, photometric, device)
             masks = [m.to(device).float() for m in masks]
             classes = [c.to(device) for c in classes]
@@ -235,6 +249,14 @@ def main() -> int:
     records = load_records(args.annotations, args.fold)
     if args.targets == "pooled":
         records = pooled_targets(records)
+    val_records, _ = records_for(args.annotations)
+    family, _, fold_text = args.output.name.rpartition("-f")
+    fold = int(fold_text) if fold_text.isdigit() else int(os.environ.get("FILAMENT_VAL_FOLD", -1))
+    # --resume is left out of the recorded settings: a restarted run continues the same WeightsLab experiment.
+    monitor = weightslab_monitor.start(family or args.output.name, fold if args.fold == "train" else -1, args.output,
+                                       {k: v for k, v in vars(args).items() if k != "resume"},
+                                       sorted({record["file_name"] for record in records}),
+                                       sorted(val_records) if args.fold == "train" else [])
     event("TARGETS", log, kind=args.targets, records=len(records),
           instances=sum(len(record["rles"]) for record in records))
     loading_started = time.time()
@@ -306,7 +328,6 @@ def main() -> int:
           whole_micro=sampler.whole_micro, checkpoint=args.checkpoint,
           rotate90=not args.no_rotate90)
 
-    val_records, _ = records_for(args.annotations)
     uploader = None
     if args.upload_dataset:
         uploader = Uploader(args.upload_dataset, args.upload_title, args.output / "staging", log)
@@ -321,7 +342,33 @@ def main() -> int:
                                      epoch=epoch_number, step=step, crop=args.crop))
         return checkpoint
 
+    eval_steps: dict[int, int] = {}
+    reported: set[int] = set()
+
+    def report_evaluations() -> None:
+        """Every finished sweep not yet sent to WeightsLab: pooled PQ of the best rule, and each photo's counts."""
+        if not monitor.active:
+            return
+        for epoch_number, report in sorted(completed_reports().items()):
+            if epoch_number in reported:
+                continue
+            reported.add(epoch_number)
+            at = eval_steps.get(epoch_number, epoch_number * steps_per_epoch)
+            best = report["best"]
+            photos_path = args.output / f"e{epoch_number:03d}_photos.json"
+            photos = json.loads(photos_path.read_text()) if photos_path.is_file() else {}
+            with monitor.evaluation():
+                monitor.log(at, **{"val/pq": best["pq"], "val/sq": best["sq"], "val/rq": best["rq"],
+                                   "val/conf": best["conf"], "val/epoch": epoch_number})
+                if photos:
+                    names = sorted(photos)
+                    monitor.samples(at, names, {"val/photo_pq": [photos[n]["pq"] for n in names],
+                                                "val/photo_tp": [photos[n]["tp"] for n in names],
+                                                "val/photo_fp": [photos[n]["fp"] for n in names],
+                                                "val/photo_fn": [photos[n]["fn"] for n in names]})
+
     def evaluate_now(epoch_number: int) -> None:
+        eval_steps[epoch_number] = step
         save_checkpoint(epoch_number)
         model.eval()
         # Floor 0.05 equals the sweep's lowest threshold. A candidate's score is its
@@ -391,27 +438,35 @@ def main() -> int:
         running, epoch_steps = 0.0, 0
         optimiser.zero_grad(set_to_none=True)
         pending: list = []
-        for pixels, masks, classes, (step_end, parts, extent), photometric in loader:
-            pending.append((pixels, masks, classes, photometric, extent))
+        for pixels, masks, classes, (step_end, parts, extent), photometric, names in loader:
+            pending.append((pixels, masks, classes, photometric, extent, names))
             if not step_end:
                 continue
-            # A step's micro-batches are collected first so each one can be weighted by its
-            # exact share of the step (`step_losses`), which makes any micro-batch size give
-            # the same loss and gradients as one big batch.
-            value = step_losses(model, pending, device, args, capture)
-            if not np.isfinite(value):
-                raise SystemExit(f"non-finite loss at step {step}: {value}")
-            running += value
-            pending = []
-            epoch_steps += 1
-            if args.clip > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-            factor = schedule(step, args.warmup, total_steps)
-            for group, rate in zip(optimiser.param_groups, base_rates):
-                group["lr"] = rate * factor
-            optimiser.step()
-            optimiser.zero_grad(set_to_none=True)
-            step += 1
+            with monitor.train_step():                    # the UI's pause button holds training here
+                # A step's micro-batches are collected first so each one can be weighted by its
+                # exact share of the step (`step_losses`), which makes any micro-batch size give
+                # the same loss and gradients as one big batch.
+                details = [] if monitor.active else None
+                value = step_losses(model, pending, device, args, capture, details)
+                if not np.isfinite(value):
+                    raise SystemExit(f"non-finite loss at step {step}: {value}")
+                running += value
+                pending = []
+                epoch_steps += 1
+                if args.clip > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+                factor = schedule(step, args.warmup, total_steps)
+                for group, rate in zip(optimiser.param_groups, base_rates):
+                    group["lr"] = rate * factor
+                optimiser.step()
+                optimiser.zero_grad(set_to_none=True)
+                step += 1
+                if details:
+                    monitor.log(step, **{"train/loss": value, "train/lr": optimiser.param_groups[-1]["lr"],
+                                         "train/epoch": epoch + epoch_steps / steps_per_epoch,
+                                         **{f"train/{k}": sum(d[2][k] for d in details) for k in details[0][2]}})
+                    monitor.samples(step, [n for d in details for n in d[0]],
+                                    {"train/photo_loss": [d[1] for d in details for _ in d[0]]})
             window_steps += 1
             if step == 5 and probe_started is None:
                 probe_started = time.time()
@@ -464,6 +519,8 @@ def main() -> int:
                     epochs, total_steps = affordable, steps_per_epoch * affordable
                 sized = True
 
+            if step % 25 == 0:
+                report_evaluations()
             if step % 25 == 0 or step == 1:
                 elapsed = time.time() - window_started
                 event("STEP", log, step=step, epoch=epoch, loss=round(running / max(1, epoch_steps), 4),
@@ -521,6 +578,7 @@ def main() -> int:
 
     for process in sweeps.values():
         process.wait()
+    report_evaluations()
     reports = completed_reports()
     exit_code = 0
     if reports:
@@ -590,4 +648,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    weightslab_monitor.run_main(main)

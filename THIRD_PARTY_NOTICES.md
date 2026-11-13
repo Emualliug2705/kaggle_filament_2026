@@ -13,3 +13,8 @@ Parts of `src/` are adapted from two open-source projects, used under their lice
   (`src/data/photos.py`), the exact selection (`src/scorer/select.py`) and the configuration files in `configs/`.
 
 The adapted files were moved, renamed and had their paths and imports changed; their algorithms are unchanged.
+
+On the `v2-weightslab` branch the trainers also report to **WeightsLab** (https://github.com/GrayboxTech/weightslab, Apache
+License 2.0, by Graybox) through `src/utils/weightslab_monitor.py`. WeightsLab is installed by pip
+(`env/requirements-weightslab.txt`), not included here. The reporting added to the trainers does not change their
+training.
