@@ -128,4 +128,4 @@ models/  work/  outputs/  downloads/     created by the notebook (git-ignored)
 
 ## Licence
 
-AGPL-3.0 (`LICENSE`). Parts of `src/` are adapted from open-source projects; see `THIRD_PARTY_NOTICES.md`.
+AGPL-3.0 (`LICENSE`). Parts of `src/` are adapted from open-source public kaggle submission to this challenge; see `THIRD_PARTY_NOTICES.md`.
