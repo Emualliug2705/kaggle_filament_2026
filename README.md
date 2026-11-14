@@ -122,8 +122,7 @@ Retraining all 40 models takes about 115 GPU-hours, about 28 h on this server. I
 ```bash
 git clone git@github.com:Emualliug2705/kaggle_filament_2026.git && cd kaggle_filament_2026
 python3.12 -m venv venv && . venv/bin/activate
-pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
-    -r env/requirements-venv.txt -r env/requirements-extra.txt jupyterlab
+pip install -r requirements.txt jupyterlab   # torch 2.8 for CUDA 12.8 comes from the PyTorch index set in the file
 jupyter lab PIPELINE.ipynb          # run all cells; or headless: python run_headless.py
 ```
 

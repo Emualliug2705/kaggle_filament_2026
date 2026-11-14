@@ -4,7 +4,7 @@ LaTeX report on the competition template (ACM `acmart`, `sigconf`): `main.tex`, 
 `main.bib`, and `figures/` (the pipeline graphic and figures produced by `PIPELINE.ipynb`).
 
 Compile on Overleaf (upload the folder; main document `main.tex`), or locally with `latexmk -pdf main.tex`. LaTeX is not installed by
-the pip requirements (`env/`): a local build needs a TeX distribution with `latexmk`, the `acmart` class and its fonts, for example
+the pip requirements (`requirements.txt`): a local build needs a TeX distribution with `latexmk`, the `acmart` class and its fonts, for example
 TeX Live, or on Debian/Ubuntu `sudo apt install latexmk texlive-latex-extra texlive-publishers texlive-fonts-extra`.
 
 To do before submitting:

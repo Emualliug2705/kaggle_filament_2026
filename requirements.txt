@@ -1,3 +1,10 @@
+# Python 3.12 environment of the pipeline:  pip install -r requirements.txt jupyterlab
+# Tested with Python 3.12.3, torch 2.8.0+cu128 (CUDA 12.8) on 4 x NVIDIA GeForce RTX 3080 Ti (12 GB), driver 595.99.02.
+
+# CUDA 12.8 builds of torch and torchvision
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# --- PyTorch, Hugging Face transformers (Mask2Former), OpenCV, pycocotools and their dependencies
 anyio==4.16.0
 certifi==2026.10.23
 charset-normalizer==3.5.2
@@ -67,3 +74,14 @@ triton==3.4.0
 typing_extensions==4.16.0
 tzdata==2026.6
 urllib3==2.8.0
+
+# --- LightGBM (scorer), timm and segmentation-models-pytorch (U-Nets), scikit-learn, gdown and kaggle (downloads)
+lightgbm==4.7.0
+timm==1.0.30
+segmentation-models-pytorch==0.6.0
+scikit-learn==1.7.2
+joblib==1.6.0
+threadpoolctl==3.7.0
+narwhals==2.28.0
+gdown==5.2.0
+kaggle==2.2.5

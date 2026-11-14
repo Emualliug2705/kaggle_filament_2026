@@ -1,3 +1,0 @@
-python 3.12.3
-torch 2.8.0+cu128 cuda 12.8 (env/requirements-venv.txt) + env/requirements-extra.txt (LightGBM, timm, segmentation-models-pytorch, scikit-learn, gdown, kaggle)
-GPUs used: 4 x NVIDIA GeForce RTX 3080 Ti (12 GB), driver 595.99.02
