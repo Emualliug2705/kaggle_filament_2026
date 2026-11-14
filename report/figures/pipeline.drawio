@@ -1,0 +1,94 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="pipeline" name="Fig. 1 - pipeline">
+    <mxGraphModel dx="1020" dy="340" grid="1" gridSize="5" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1010" pageHeight="360" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- input -->
+        <mxCell id="photo" value="H-&lt;i&gt;α&lt;/i&gt; photo&lt;br&gt;2048×2048" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e9e9e9;strokeColor=#52514e;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="5" y="141" width="110" height="76" as="geometry" />
+        </mxCell>
+
+        <!-- candidate generation (blue) -->
+        <mxCell id="m2f_gray" value="Mask2Former, grayscale&lt;br&gt;5 folds × 8 views (D4)" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e5eefa;strokeColor=#2a78d6;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="149" y="9" width="245" height="87" as="geometry" />
+        </mxCell>
+        <mxCell id="m2f_limb" value="Mask2Former, limb-corrected&lt;br&gt;5 folds × 8 views (D4)" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e5eefa;strokeColor=#2a78d6;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="149" y="110" width="245" height="87" as="geometry" />
+        </mxCell>
+        <mxCell id="fuse" value="fuse 16 views&lt;br&gt;(IoU link 0.5,&lt;br&gt;pixel vote)&lt;br&gt;= candidate pool" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e5eefa;strokeColor=#2a78d6;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="438" y="55" width="154" height="107" as="geometry" />
+        </mxCell>
+
+        <!-- evidence (green) -->
+        <mxCell id="evidence" value="Evidence models (5 folds each):&lt;br&gt;Mask R-CNN; 3 U-Nets&lt;br&gt;(probability + spine);&lt;br&gt;ROI detector + refiner" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e3f5ee;strokeColor=#1baf7a;strokeWidth=1.5;fontFamily=Helvetica;fontSize=12;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="149" y="212" width="245" height="97" as="geometry" />
+        </mxCell>
+        <mxCell id="features" value="76 numbers per&lt;br&gt;candidate: shape,&lt;br&gt;scores, contrast,&lt;br&gt;agreement with&lt;br&gt;evidence models" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e3f5ee;strokeColor=#1baf7a;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="438" y="202" width="154" height="117" as="geometry" />
+        </mxCell>
+
+        <!-- decision (orange) -->
+        <mxCell id="scorer" value="LightGBM scorer&lt;br&gt;&lt;i&gt;q&lt;/i&gt; = expected&lt;br&gt;matched IoU&lt;br&gt;(cross-fitted)" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#fcece6;strokeColor=#eb6834;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="637" y="55" width="165" height="107" as="geometry" />
+        </mxCell>
+        <mxCell id="selection" value="exact selection&lt;br&gt;max ∑(&lt;i&gt;q&lt;/i&gt; − &lt;i&gt;τ&lt;/i&gt;),&lt;br&gt;overlap &amp;lt; &lt;i&gt;θ&lt;/i&gt;&lt;br&gt;(MILP)" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#fcece6;strokeColor=#eb6834;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="836" y="55" width="160" height="107" as="geometry" />
+        </mxCell>
+        <mxCell id="test" value="on test: candidates&lt;br&gt;of the 5 fold models&lt;br&gt;fused, then selected&lt;br&gt;with the OOF &lt;i&gt;τ&lt;/i&gt;, &lt;i&gt;θ&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#fcece6;strokeColor=#eb6834;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="637" y="212" width="165" height="107" as="geometry" />
+        </mxCell>
+
+        <!-- output (blue) -->
+        <mxCell id="redraw" value="boundary redrawn&lt;br&gt;within 3 px from&lt;br&gt;the U-Net maps&lt;br&gt;→ submission" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e5eefa;strokeColor=#2a78d6;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="836" y="212" width="160" height="107" as="geometry" />
+        </mxCell>
+
+        <!-- arrows -->
+        <mxCell id="e1" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="photo" target="m2f_gray">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="photo" target="m2f_limb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="photo" target="evidence">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.35;entryDx=0;entryDy=0;" edge="1" parent="1" source="m2f_gray" target="fuse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.65;entryDx=0;entryDy=0;" edge="1" parent="1" source="m2f_limb" target="fuse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="fuse" target="features">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="evidence" target="features">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="features" target="scorer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="scorer" target="selection">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="&lt;i&gt;τ&lt;/i&gt;, &lt;i&gt;θ&lt;/i&gt;" style="fontFamily=Helvetica;fontSize=12;fontColor=#1a1a1a;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=0.27;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="selection" target="test">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="endArrow=block;endFill=1;endSize=5;html=1;rounded=0;strokeColor=#52514e;strokeWidth=1.5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="test" target="redraw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- U-Net probability maps used by the boundary redraw -->
+        <mxCell id="e12" value="&lt;i&gt;U-Net maps&lt;/i&gt;" style="fontFamily=Helvetica;fontSize=11;fontColor=#52514e;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;endSize=5;html=1;rounded=0;dashed=1;strokeColor=#52514e;strokeWidth=1.5;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="evidence" target="redraw">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="271.5" y="340" />
+              <mxPoint x="916" y="340" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

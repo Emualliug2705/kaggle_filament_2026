@@ -26,8 +26,8 @@ disagree, as above: 11 filaments for one, 7 for the other, and only some of them
         ──► Mask R-CNN + 3 U-Nets (5 folds) ──► detector candidates, probability + spine maps ──┐
         ──► ROI detector + refiner (5 folds) ──► ROI candidates ────────────────────────────────┤
                                                                                                   ▼
-   76 numbers per candidate ──► LightGBM scorer q (expected matched IoU) ──► exact non-overlapping selection
-   ──► 5 fold models fused on test ──► boundaries redrawn within 3 px from the U-Net maps ──► submission.csv
+   76 numbers per candidate ──► LightGBM scorer q (expected matched IoU) ──► on test, 5 fold models fused
+   ──► exact non-overlapping selection ──► boundaries redrawn within 3 px from the U-Net maps ──► submission.csv
 ```
 
 1. **Candidates.** Two Swin-S Mask2Former families, trained at native resolution on the 5 folds of `data/folds.json` (grouped by date).
@@ -54,10 +54,10 @@ equivalent out of fold (0.4774 vs 0.4770, difference -0.0003, 95% interval -0.00
 
 Every model uses the same 5 folds, fixed in `data/folds.json` (142, 142, 141, 141 and 141 photos).
 
-* **Grouped by day.** The 707 photos were taken on 656 days (UTC), up to 3 per day from different observatory sites; the date opens the
+* **Grouped by day.** The 707 photos were taken on 656 days (UTC), up to 3 per day, mostly from different observatory sites; the date opens the
   file name (`YYYYMMDDhhmmss`, the letter before `h` is the site). Photos of the same day show the same filaments, so a day is never
   split between two folds. The folds were drawn once as a group k-fold over that date: no day is shared between folds, and every fold
-  spans 2011-2022 and holds photos of all six sites.
+  holds photos from at least 11 of the 12 years 2011-2022 and from all six sites.
 * **Whole photos.** A fold holds photos, so all annotators of a photo are on the same side.
 * **Fixed file.** The file is the reference: `src/data/split.py` reads it for every model (`FILAMENT_FOLDS_JSON`, `FILAMENT_VAL_FOLD`).
   Drawing a new group k-fold gives a different assignment, and then the shipped models would no longer be out of fold.

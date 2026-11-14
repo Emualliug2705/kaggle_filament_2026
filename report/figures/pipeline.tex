@@ -1,0 +1,64 @@
+% Fig. 1: the pipeline in four parts (TikZ; replaces pipeline.png / pipeline.drawio).
+% Parts and colours: 1 Data (gray), 2 Candidate generation (blue), 3 Selection (orange), 4 Refinement (green).
+% Input from main.tex inside a figure*; needs \usepackage{tikz} and \usetikzlibrary{arrows.meta}.
+\definecolor{pdata}{HTML}{52514E}\definecolor{pdataF}{HTML}{E9E9E9}
+\definecolor{pcand}{HTML}{2A78D6}\definecolor{pcandF}{HTML}{E5EEFA}
+\definecolor{psel}{HTML}{EB6834}\definecolor{pselF}{HTML}{FCECE6}
+\definecolor{pref}{HTML}{1BAF7A}\definecolor{prefF}{HTML}{E3F5EE}
+\definecolor{parrow}{HTML}{4A4A4A}
+\begin{tikzpicture}[
+    x=1cm, y=1cm,
+    font=\scriptsize\sffamily,
+    box/.style={draw, rounded corners=3pt, line width=0.8pt, align=center, inner sep=2.5pt, text width=#1},
+    box/.default=2.3cm,
+    data/.style={box=#1, draw=pdata, fill=pdataF}, data/.default=1.95cm,
+    cand/.style={box=#1, draw=pcand, fill=pcandF}, cand/.default=2.3cm,
+    sel/.style={box=#1, draw=psel, fill=pselF}, sel/.default=2.4cm,
+    ref/.style={box=#1, draw=pref, fill=prefF}, ref/.default=2.45cm,
+    flow/.style={-{Stealth[length=4pt]}, line width=0.6pt, draw=parrow},
+    part/.style={draw=#1, dashed, rounded corners=5pt, line width=0.5pt, fill=#1!4},
+    head/.style={font=\footnotesize\sffamily\bfseries, text=#1, anchor=north},
+  ]
+  % ---- part frames and headers -------------------------------------------------------------------
+  \def\ybot{-0.75} \def\ytop{5.35}
+  \path[part=pdata] (0.00,\ybot) rectangle (2.35,\ytop);
+  \path[part=pcand] (2.55,\ybot) rectangle (8.05,\ytop);
+  \path[part=psel]  (8.25,\ybot) rectangle (14.35,\ytop);
+  \path[part=pref]  (14.55,\ybot) rectangle (17.55,\ytop);
+  \node[head=pdata] at (1.175,\ytop-0.08) {1.\enspace Data};
+  \node[head=pcand] at (5.30,\ytop-0.08)  {2.\enspace Candidate generation};
+  \node[head=psel]  at (11.30,\ytop-0.08) {3.\enspace Selection};
+  \node[head=pref]  at (16.05,\ytop-0.08) {4.\enspace Refinement};
+
+  % ---- 1 Data --------------------------------------------------------------------------------------
+  \node[data] (photo) at (1.175,2.45) {H-$\alpha$ photograph\\2048$\times$2048\\[3pt]707 training,\\5 folds grouped\\by day};
+
+  % ---- 2 Candidate generation ---------------------------------------------------------------------
+  \node[cand] (m2fg) at (3.95,3.75) {Mask2Former,\\grayscale\\5 folds $\times$ 8 views};
+  \node[cand] (m2fl) at (3.95,1.55) {Mask2Former,\\limb-corrected\\5 folds $\times$ 8 views};
+  \node[cand=1.95cm] (fuse) at (6.85,2.65) {fuse the 16 views\\(IoU link 0.5,\\pixel vote)\\$=$ candidate pool};
+
+  % ---- 3 Selection --------------------------------------------------------------------------------
+  \node[sel] (feat) at (9.80,3.70) {76 numbers per\\candidate: shape,\\scores, contrast,\\agreement with\\evidence models};
+  \node[sel] (evid) at (9.80,1.00) {evidence models\\(5 folds each):\\Mask R-CNN, 3 U-Nets\\(probability, spine),\\tiled detector};
+  \node[sel] (scor) at (12.85,4.10) {LightGBM scorer\\$q$ = expected\\matched IoU};
+  \node[sel] (selx) at (12.85,2.62) {exact selection\\max $\sum(q-\tau)$,\\overlap $<\theta$};
+  \node[sel] (test) at (12.85,1.02) {on test: candidates\\of the 5 fold models\\fused, then selected\\with the OOF $\tau$, $\theta$};
+
+  % ---- 4 Refinement -------------------------------------------------------------------------------
+  \node[ref] (redr) at (16.05,2.62) {boundary redrawn\\within 3 px from\\the U-Net maps\\[2pt]$\rightarrow$ submission};
+
+  % ---- arrows -------------------------------------------------------------------------------------
+  \draw[flow] (photo.east) -- (m2fg.west);
+  \draw[flow] (photo.east) -- (m2fl.west);
+  \draw[flow] (photo.south) -- (1.175,-0.25) -- (8.15,-0.25) |- (evid.west);
+  \draw[flow] (m2fg.east) -- (fuse.west);
+  \draw[flow] (m2fl.east) -- (fuse.west);
+  \draw[flow] (fuse.east) -- (feat.west);
+  \draw[flow] (evid.north) -- (feat.south);
+  \draw[flow] (feat.east) -- (scor.west);
+  \draw[flow] (scor.south) -- (selx.north);
+  \draw[flow] (selx.south) -- (test.north) node[midway, right=1pt, font=\tiny\sffamily] {$\tau$, $\theta$};
+  \draw[flow] (test.east) -- (redr.west);
+  \draw[flow, dashed] (evid.south) -- (9.80,-0.25) -- (16.05,-0.25) node[pos=0.5, below=0pt, font=\tiny\sffamily\itshape, text=parrow] {U-Net maps} -- (redr.south);
+\end{tikzpicture}
