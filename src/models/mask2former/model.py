@@ -74,9 +74,9 @@ def backbone_checkpointing(model, enabled: bool) -> None:
     """
     from transformers.modeling_layers import GradientCheckpointingLayer
     encoder = model.model.pixel_level_module.encoder
-    if enabled and not getattr(encoder, "_sol_checkpoint_ready", False):
+    if enabled and not getattr(encoder, "_backbone_checkpoint_ready", False):
         encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        encoder._sol_checkpoint_ready = True
+        encoder._backbone_checkpoint_ready = True
     layers = [module for module in encoder.modules() if isinstance(module, GradientCheckpointingLayer)]
     if enabled and not layers:
         raise SystemExit("backbone has no checkpointable layers; the transformers version changed")

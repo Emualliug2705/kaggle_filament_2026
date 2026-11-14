@@ -14,6 +14,10 @@ Parts of `src/` are adapted from two open-source projects, used under their lice
 
 The adapted files were moved, renamed and had their paths and imports changed; their algorithms are unchanged.
 
+Also cited, for inspiration and as a baseline for comparison:
+
+* **NSO-Solar-Filament-Challenge** (https://github.com/pragyaangaur/NSO-Solar-Filament-Challenge).
+
 On the `v2-weightslab` branch the Mask2Former trainer also reports to **WeightsLab**
 (https://github.com/GrayboxTech/weightslab, Apache License 2.0, by Graybox) through `src/utils/weightslab_monitor.py`.
 WeightsLab is installed by pip (`env/requirements-weightslab.txt`), not included here. The reporting does not change
