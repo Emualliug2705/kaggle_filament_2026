@@ -1,5 +1,5 @@
 # kaggle_filament_2026
-Code for final submission - LB 0.41
+Code of our solution to the Kaggle competition filament-segmentation-2026: training, inference and the final submission.
 
 ## Solar filament instance segmentation
 
@@ -8,7 +8,13 @@ Solar filaments are dark, elongated clouds of cool plasma seen against the Sun's
 full-disk images as its own mask. Entries are scored by panoptic quality (PQ) against each annotator's drawing separately: a predicted mask
 counts only if it overlaps that annotator's filament by more than half (IoU > 0.5).
 
-**Final submission: out-of-fold PQ 0.4770 on the 707 training photos** (Kaggle submission ref 58304440).
+![A training photo and its two annotators' filaments](reference/figures/task_example.png)
+
+The training set has 707 photos with 1,154 annotator records (one to three annotators per photo, 8,199 filaments). Annotators often
+disagree, as above: 11 filaments for one, 7 for the other, and only some of them in common.
+
+**Result: out-of-fold PQ 0.4770** on the 707 training photos (95% bootstrap interval 0.4685-0.4854; the five folds range from 0.4703 to
+0.4870). Each photo is predicted by models that never saw it during training (see [Folds](#folds)).
 
 ![Out-of-fold PQ at each stage](reference/figures/score_progression.png)
 
@@ -44,10 +50,32 @@ equivalent out of fold (0.4774 vs 0.4770, difference -0.0003, 95% interval -0.00
 
 <img src="reference/figures/redraw_closeup.png" alt="Boundary redraw close up" width="420">
 
+## Folds
+
+Every model uses the same 5 folds, fixed in `data/folds.json` (142, 142, 141, 141 and 141 photos).
+
+* **Grouped by day.** The 707 photos were taken on 656 days (UTC), up to 3 per day from different observatory sites; the date opens the
+  file name (`YYYYMMDDhhmmss`, the letter before `h` is the site). Photos of the same day show the same filaments, so a day is never
+  split between two folds. The folds were drawn once as a group k-fold over that date: no day is shared between folds, and every fold
+  spans 2011-2022 and holds photos of all six sites.
+* **Whole photos.** A fold holds photos, so all annotators of a photo are on the same side.
+* **Fixed file.** The file is the reference: `src/data/split.py` reads it for every model (`FILAMENT_FOLDS_JSON`, `FILAMENT_VAL_FOLD`).
+  Drawing a new group k-fold gives a different assignment, and then the shipped models would no longer be out of fold.
+* **How they are used.** Each model is trained five times, once per fold, on the other four folds (565-566 photos), and predicts the fold
+  it did not see. Every training photo therefore has an out-of-fold prediction. The scorer is cross-fitted on the same folds, and every
+  choice (models, epochs, scorer settings, thresholds) is made on these out-of-fold predictions. On test, the five fold models are fused.
+
+| Fold | 0 | 1 | 2 | 3 | 4 | All 707 photos |
+|---|---|---|---|---|---|---|
+| Out-of-fold PQ of the final pipeline | 0.4747 | 0.4870 | 0.4703 | 0.4800 | 0.4732 | 0.4770 |
+
+The spread between folds (sd 0.0066) comes from the photos each fold holds, not from better or worse models: the five fold models are
+trained the same way.
+
 ## Reproducing the result
 
 `PIPELINE.ipynb` runs the whole pipeline, from the photos to `outputs/submission.csv`, with every step explained. It rebuilds the submitted
-file **byte for byte**; its last check compares SHA-256 hashes.
+file (Kaggle submission ref 58304440) **byte for byte**; its last check compares SHA-256 hashes.
 
 * **Integrity.** The data, the 40 checkpoints and the shipped inference outputs are checked against `reference/CHECKSUMS.json`. A missing or
   changed model is listed with its training time, and retrained only after you confirm.
