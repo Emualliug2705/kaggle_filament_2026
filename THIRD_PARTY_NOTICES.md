@@ -13,3 +13,7 @@ Parts of `src/` are adapted from two open-source projects, used under their lice
   (`src/data/photos.py`), the exact selection (`src/scorer/select.py`) and the configuration files in `configs/`.
 
 The adapted files were moved, renamed and had their paths and imports changed; their algorithms are unchanged.
+
+Also cited, for inspiration and as a baseline for comparison:
+
+* **NSO-Solar-Filament-Challenge** (https://github.com/pragyaangaur/NSO-Solar-Filament-Challenge).
