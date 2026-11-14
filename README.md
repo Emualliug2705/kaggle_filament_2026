@@ -129,4 +129,3 @@ models/  work/  outputs/  downloads/     created by the notebook (git-ignored)
 ## Licence
 
 AGPL-3.0 (`LICENSE`). Parts of `src/` are adapted from open-source projects; see `THIRD_PARTY_NOTICES.md`.
-Keep this repository **private until the competition ends**: Kaggle rules generally forbid sharing code outside Kaggle during a competition.
