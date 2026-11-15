@@ -1,8 +1,11 @@
 """Out-of-fold evaluation of the boundary redraw (CPU, 707 photos): the final scorer's out-of-fold selection, as
-emitted and with each boundary redrawn within r px from the U-Net maps of the fold models that did not train on the
-photo; paired bootstrap against the masks as emitted. Writes oof_counts_*.npy and redraw_report.md in work/scorer/final.
+emitted and with each boundary redrawn from the U-Net maps of the fold models that did not train on the photo, with the
+three rules of src.scorer.redraw: the previous threshold rule (3 px), the same rule on the shifted map (2 px) and the
+final rule (shift + area blend, 2 px). Paired bootstraps over photos against the masks as emitted and against the
+previous rule. Writes oof_counts_asemitted.npy, oof_counts_threshold3.npy, oof_counts_final.npy and redraw_report.md
+in work/scorer/final.
 
-    python -m src.scorer.redraw_oof        (radii: FILAMENT_REDRAW_RADII, default 3)
+    python -m src.scorer.redraw_oof
 """
 import json
 import os
@@ -17,11 +20,17 @@ from src.evaluation.oof import counts, native, pq  # noqa: E402
 from src.scorer import selector as S  # noqa: E402
 from src.scorer.oof_jobs import base_masks, boot, load_jobs  # noqa: E402
 from src.scorer.paint import paint  # noqa: E402
-from src.scorer.redraw import redraw  # noqa: E402
+from src.scorer.redraw import redraw, redraw_blend, shifted  # noqa: E402
 
 MAPS = Path(os.environ.get("FILAMENT_REDRAW_MAPS", str(paths.SCRATCH / "maps")))
 ARCHES = tuple(os.environ.get("FILAMENT_REDRAW_ARCHES", "cnxL,r34").split(","))   # maps averaged for the redraw
-RADII = tuple(int(r) for r in os.environ.get("FILAMENT_REDRAW_RADII", "3").split(","))
+EMITTED = "as emitted"
+PREVIOUS = "threshold rule, 3 px (previous submission)"
+SHIFTED = "threshold rule on the map shifted 0.25 px up, 2 px"
+FINAL = "final: shift + area blend, 2 px"
+RULES = {PREVIOUS: lambda m, U: redraw(m, U, 3), SHIFTED: lambda m, U: redraw(m, shifted(U), 2),
+         FINAL: lambda m, U: redraw_blend(m, U, 2)}
+FILES = {EMITTED: "oof_counts_asemitted.npy", PREVIOUS: "oof_counts_threshold3.npy", FINAL: "oof_counts_final.npy"}
 
 
 def photo(job):
@@ -36,9 +45,9 @@ def photo(job):
             t += counts(pred, g)[0]
         return t
 
-    out = {"as emitted": total(base)}
-    for r in RADII:
-        out[f"boundary within {r} px from the full-resolution U-Nets"] = total(paint([redraw(m, U, r) for m in masks]))
+    out = {EMITTED: total(base)}
+    for key, rule in RULES.items():
+        out[key] = total(paint([rule(m, U) for m in masks]))
     return out
 
 
@@ -54,24 +63,26 @@ def main():
         res = list(ex.map(photo, full, chunksize=2))
     keys = list(res[0])
     T = {k: np.array([r[k] for r in res]) for k in keys}
-    for r_ in RADII:
-        k_ = f"boundary within {r_} px from the full-resolution U-Nets"
-        if k_ in T:
-            np.save(S.out_dir() / f"oof_counts_fullres{r_}.npy", T[k_])
-    np.save(S.out_dir() / "oof_counts_asemitted.npy", T["as emitted"])
+    for k, f in FILES.items():
+        np.save(S.out_dir() / f, T[k])
     sq = lambda t: t[3] / t[0]                                                # noqa: E731
     rq = lambda t: t[0] / (t[0] + t[1] / 2 + t[2] / 2)                        # noqa: E731
-    B = T["as emitted"]
     L = ["", "## Full-resolution boundaries (707 out-of-fold photos; each mask keeps its extent, its boundary is "
          "redrawn from the U-Net probability maps)", "",
-         "| masks | PQ | change | 95% interval | P(better) | matched IoU | match rate |", "|---|---|---|---|---|---|---|"]
+         "| masks | PQ | vs as emitted [95% interval] | vs previous rule [95% interval] | matched IoU | match rate |",
+         "|---|---|---|---|---|---|"]
+
+    def against(k, ref):
+        if k == ref or (ref == PREVIOUS and k == EMITTED):
+            return "-"
+        lo, hi, p = boot(T[k], T[ref])
+        return f"{pq(T[k].sum(0)) - pq(T[ref].sum(0)):+.4f} [{lo:+.4f}, {hi:+.4f}], P(better) {p:.2f}"
+
     for k in keys:
         t = T[k].sum(0)
-        if k == "as emitted":
-            L.append(f"| {k} | {pq(t):.4f} | - | - | - | {sq(t):.4f} | {rq(t):.4f} |")
-        else:
-            lo, hi, p = boot(T[k], B)
-            L.append(f"| {k} | {pq(t):.4f} | {pq(t) - pq(B.sum(0)):+.4f} | {lo:+.4f} to {hi:+.4f} | {p:.2f} | {sq(t):.4f} | {rq(t):.4f} |")
+        L.append(f"| {k} | {pq(t):.4f} | {against(k, EMITTED)} | {against(k, PREVIOUS)} | {sq(t):.4f} | {rq(t):.4f} |")
+    folds = [pq(T[FINAL][np.asarray(fold) == k].sum(0)) for k in range(5)]
+    L += ["", "final rule, by fold: " + ", ".join(f"{v:.4f}" for v in folds)]
     with open(S.out_dir() / "redraw_report.md", "w") as fh:
         fh.write("\n".join(L) + "\n")
     print("\n".join(L))

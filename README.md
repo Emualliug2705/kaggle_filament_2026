@@ -13,8 +13,9 @@ counts only if it overlaps that annotator's filament by more than half (IoU > 0.
 The training set has 707 photos with 1,154 annotator records (one to three annotators per photo, 8,199 filaments). Annotators often
 disagree, as above: 11 filaments for one, 7 for the other, and only some of them in common.
 
-**Result: out-of-fold PQ 0.4770** on the 707 training photos (95% bootstrap interval 0.4685-0.4854; the five folds range from 0.4703 to
-0.4870). Each photo is predicted by models that never saw it during training (see [Folds](#folds)).
+**Result: out-of-fold PQ 0.4783** on the 707 training photos (95% bootstrap interval 0.4696-0.4865; the five folds range from 0.4717 to
+0.4861). Each photo is predicted by models that never saw it during training (see [Folds](#folds)). On the public leaderboard the final
+submission (ref 58390515) shows 0.42; the previous one (ref 58304440, out-of-fold 0.4770) showed 0.41.
 
 ![Out-of-fold PQ at each stage](reference/figures/score_progression.png)
 
@@ -27,7 +28,7 @@ disagree, as above: 11 filaments for one, 7 for the other, and only some of them
         ──► ROI detector + refiner (5 folds) ──► ROI candidates ────────────────────────────────┤
                                                                                                   ▼
    76 numbers per candidate ──► LightGBM scorer q (expected matched IoU) ──► on test, 5 fold models fused
-   ──► exact non-overlapping selection ──► boundaries redrawn within 3 px from the U-Net maps ──► submission.csv
+   ──► exact non-overlapping selection ──► boundaries redrawn within 2 px from the U-Net maps ──► submission.csv
 ```
 
 1. **Candidates.** Two Swin-S Mask2Former families, trained at native resolution on the 5 folds of `data/folds.json` (grouped by date).
@@ -41,10 +42,24 @@ disagree, as above: 11 filaments for one, 7 for the other, and only some of them
 4. **Selection.** Among a photo's candidates, the set maximising the sum of (q - tau) with no two masks overlapping by more than 10 % of
    the smaller one, solved exactly (integer programming). On test, the 5 fold models' candidates are fused first.
 5. **Full-resolution boundaries.** Mask2Former masks come out at 1/4 resolution. Each kept mask keeps its extent, and its boundary is redrawn
-   within 3 px from the full-resolution U-Net probability maps.
+   within 2 px from the full-resolution U-Net probability maps, in two steps:
+   * **Sub-pixel shift.** The probability map is moved 0.25 px towards the top of the photo, where the annotators' outlines sit on
+     average.
+   * **Area blend.** The new mask's area is the geometric mean of the Mask2Former area and the U-Net area (the U-Net blob above 0.5
+     inside the 2 px band, ratio limited to 0.8-1.25); the band pixels with the highest probability are kept up to that area.
 
-The models, epochs, scorer settings and selection threshold are chosen on out-of-fold PQ. For the boundary redraw, 1 px and 3 px are
-equivalent out of fold (0.4774 vs 0.4770, difference -0.0003, 95% interval -0.0012 to +0.0006); the final uses 3 px.
+The models, epochs, scorer settings, selection threshold and redraw rule are chosen on out-of-fold PQ. The boundary redraw was revised
+after the first submission, without retraining anything:
+
+| Boundary of the kept masks (same selection, 707 out-of-fold photos) | PQ | Change |
+|---|---|---|
+| As emitted by Mask2Former | 0.4744 | |
+| Previous rule: per-mask threshold on the U-Net map, 3 px (submission 58304440) | 0.4765 | +0.0021 (95% interval +0.0007 to +0.0035) |
+| Same rule on the map shifted 0.25 px up, 2 px | 0.4774 | +0.0009 (+0.0001 to +0.0018) |
+| **Final rule: shift + area blend, 2 px (submission 58390515)** | **0.4783** | +0.0009 (+0.0000 to +0.0018); **+0.0018 over the previous rule (+0.0008 to +0.0029)** |
+
+The final rule is better than the previous one in each of the 5 folds. These numbers are from the second machine (see
+[Hardware used](#hardware-used)), where the previous rule scores 0.4765 instead of 0.4770.
 
 ![Out-of-fold predictions on training photos](reference/figures/oof_predictions.png)
 
@@ -67,15 +82,21 @@ Every model uses the same 5 folds, fixed in `data/folds.json` (142, 142, 141, 14
 
 | Fold | 0 | 1 | 2 | 3 | 4 | All 707 photos |
 |---|---|---|---|---|---|---|
-| Out-of-fold PQ of the final pipeline | 0.4747 | 0.4870 | 0.4703 | 0.4800 | 0.4732 | 0.4770 |
+| Out-of-fold PQ of the final pipeline | 0.4771 | 0.4861 | 0.4717 | 0.4809 | 0.4757 | 0.4783 |
+| Previous submission (first server) | 0.4747 | 0.4870 | 0.4703 | 0.4800 | 0.4732 | 0.4770 |
 
-The spread between folds (sd 0.0066) comes from the photos each fold holds, not from better or worse models: the five fold models are
+The spread between folds (sd 0.0055) comes from the photos each fold holds, not from better or worse models: the five fold models are
 trained the same way.
 
 ## Reproducing the result
 
-`PIPELINE.ipynb` runs the whole pipeline, from the photos to `outputs/submission.csv`, with every step explained. It rebuilds the submitted
-file (Kaggle submission ref 58304440) **byte for byte**; its last check compares SHA-256 hashes.
+`PIPELINE.ipynb` runs the whole pipeline, from the photos to `outputs/submission.csv`, with every step explained. Its last check compares
+the result with the submitted file (Kaggle submission ref 58390515, kept in `reference/submission.csv`): by SHA-256, then mask by mask.
+
+* **What to expect.** From the same U-Net maps, the selection and the redraw rebuild the submitted file **byte for byte**. The U-Net maps
+  themselves are recomputed by the notebook, and they were not bit-identical between our two machines: rerun on the second machine, the
+  previous pipeline changed 8 of its 1,247 test masks (the other 1,239 matched at a mean IoU of 0.999) and its out-of-fold PQ moved
+  from 0.4770 to 0.4765. On another machine, expect the same kind of difference (a few masks) rather than the same hash.
 
 * **Integrity.** The data, the 40 checkpoints and the shipped inference outputs are checked against `reference/CHECKSUMS.json`. A missing or
   changed model is listed with its training time, and retrained only after you confirm.
@@ -86,7 +107,7 @@ file (Kaggle submission ref 58304440) **byte for byte**; its last check compares
 
 ### Hardware used
 
-The models were trained, and the submission produced, on one rented cloud GPU server:
+The models were trained, and the first submission (58304440) produced, on one rented cloud GPU server:
 
 | | |
 |---|---|
@@ -95,6 +116,10 @@ The models were trained, and the submission produced, on one rented cloud GPU se
 | Memory | 377 GB RAM, including a 41 GB RAM disk (`/dev/shm`) for the large intermediate files |
 | Disk | 32 GB |
 | Software | Ubuntu 24.04, Python 3.12.3, PyTorch 2.8.0 with CUDA 12.8 |
+
+The final submission (58390515) was produced on a second machine, where the notebook rebuilds it byte for byte, from the same 40 downloaded models (inference, scorer,
+selection and redraw only; nothing retrained): 2 x NVIDIA GeForce RTX 3080 (10 GB each), 4 CPU cores, 76 GB RAM, same PyTorch and CUDA
+versions. There a run takes about 1 h 40 min, most of it in the CPU steps.
 
 ### Training time, and why it is long
 
@@ -144,11 +169,11 @@ src/
   training/         launchers and trainers: mask2former.py, evidence_models.py, train_unet.py, train_maskrcnn.py, train_roi.py
   inference/        Mask2Former caches and views, two-family pools, ROI banks, view fusion
   scorer/           features + LightGBM + selection (selector.py), exact selection (select.py), boundary redraw
-  evaluation/       out-of-fold matching and PQ, validation sweeps
+  evaluation/       out-of-fold matching and PQ, validation sweeps, comparison of two submission files
   utils/            masks, events
 configs/            model and data settings
 data/folds.json     the 5 folds (photos and annotations are downloaded)
-reference/          checksums, download sources, the submitted file's SHA-256, epoch table, figures
+reference/          checksums, download sources, the submitted file and its SHA-256, epoch table, figures
 report/             the competition report (LaTeX, first draft)
 models/  work/  outputs/  downloads/     created by the notebook (git-ignored)
 ```

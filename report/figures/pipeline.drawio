@@ -41,7 +41,7 @@
         </mxCell>
 
         <!-- output (blue) -->
-        <mxCell id="redraw" value="boundary redrawn&lt;br&gt;within 3 px from&lt;br&gt;the U-Net maps&lt;br&gt;→ submission" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e5eefa;strokeColor=#2a78d6;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+        <mxCell id="redraw" value="boundary redrawn&lt;br&gt;within 2 px from&lt;br&gt;the U-Net maps&lt;br&gt;→ submission" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e5eefa;strokeColor=#2a78d6;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
           <mxGeometry x="836" y="212" width="160" height="107" as="geometry" />
         </mxCell>
 
