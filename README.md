@@ -14,8 +14,8 @@ The training set has 707 photos with 1,154 annotator records (one to three annot
 disagree, as above: 11 filaments for one, 7 for the other, and only some of them in common.
 
 **Result: out-of-fold PQ 0.4783** on the 707 training photos (95% bootstrap interval 0.4696-0.4865; the five folds range from 0.4717 to
-0.4861). Each photo is predicted by models that never saw it during training (see [Folds](#folds)). On the public leaderboard the final
-submission (ref 58390515) shows 0.42; the previous one (ref 58304440, out-of-fold 0.4770) showed 0.41.
+0.4861). Each photo is predicted by models that never saw it during training (see [Folds](#folds)). On the public leaderboard the
+submission (ref 58390515) scores 0.42.
 
 ![Out-of-fold PQ at each stage](reference/figures/score_progression.png)
 
@@ -48,18 +48,8 @@ submission (ref 58390515) shows 0.42; the previous one (ref 58304440, out-of-fol
    * **Area blend.** The new mask's area is the geometric mean of the Mask2Former area and the U-Net area (the U-Net blob above 0.5
      inside the 2 px band, ratio limited to 0.8-1.25); the band pixels with the highest probability are kept up to that area.
 
-The models, epochs, scorer settings, selection threshold and redraw rule are chosen on out-of-fold PQ. The boundary redraw was revised
-after the first submission, without retraining anything:
-
-| Boundary of the kept masks (same selection, 707 out-of-fold photos) | PQ | Change |
-|---|---|---|
-| As emitted by Mask2Former | 0.4744 | |
-| Previous rule: per-mask threshold on the U-Net map, 3 px (submission 58304440) | 0.4765 | +0.0021 (95% interval +0.0007 to +0.0035) |
-| Same rule on the map shifted 0.25 px up, 2 px | 0.4774 | +0.0009 (+0.0001 to +0.0018) |
-| **Final rule: shift + area blend, 2 px (submission 58390515)** | **0.4783** | +0.0009 (+0.0000 to +0.0018); **+0.0018 over the previous rule (+0.0008 to +0.0029)** |
-
-The final rule is better than the previous one in each of the 5 folds. These numbers are from the second machine (see
-[Hardware used](#hardware-used)), where the previous rule scores 0.4765 instead of 0.4770.
+The models, epochs, scorer settings, selection threshold and redraw rule are chosen on out-of-fold PQ. The boundary redraw adds +0.0039
+to the masks as emitted (0.4744 to 0.4783, 95% interval +0.0025 to +0.0054).
 
 ![Out-of-fold predictions on training photos](reference/figures/oof_predictions.png)
 
@@ -83,7 +73,6 @@ Every model uses the same 5 folds, fixed in `data/folds.json` (142, 142, 141, 14
 | Fold | 0 | 1 | 2 | 3 | 4 | All 707 photos |
 |---|---|---|---|---|---|---|
 | Out-of-fold PQ of the final pipeline | 0.4771 | 0.4861 | 0.4717 | 0.4809 | 0.4757 | 0.4783 |
-| Previous submission (first server) | 0.4747 | 0.4870 | 0.4703 | 0.4800 | 0.4732 | 0.4770 |
 
 The spread between folds (sd 0.0055) comes from the photos each fold holds, not from better or worse models: the five fold models are
 trained the same way.
@@ -94,10 +83,9 @@ trained the same way.
 the result with the submitted file (Kaggle submission ref 58390515, kept in `reference/submission.csv`): by SHA-256, then mask by mask.
 
 * **What to expect.** From the same U-Net maps, the selection and the redraw rebuild the submitted file **byte for byte**. The U-Net maps
-  themselves are recomputed by the notebook, and they were not bit-identical between our two machines: rerun on the second machine, the
-  previous pipeline changed 8 of its 1,247 test masks (the other 1,239 matched at a mean IoU of 0.999) and its out-of-fold PQ moved
-  from 0.4770 to 0.4765. On another machine, expect the same kind of difference (a few masks) rather than the same hash.
-
+  themselves are recomputed by the notebook, and they were not bit-identical between our two machines: for an earlier version of the
+  pipeline, 8 of the 1,247 test masks changed from one machine to the other (the other 1,239 matched at a mean IoU of 0.999). On another
+  machine, expect the same kind of difference (a few masks) rather than the same hash.
 * **Integrity.** The data, the 40 checkpoints and the shipped inference outputs are checked against `reference/CHECKSUMS.json`. A missing or
   changed model is listed with its training time, and retrained only after you confirm.
 * **Training.** The training code was checked against the original runs: same losses at the first steps (to the digit for the ROI models,
@@ -107,7 +95,7 @@ the result with the submitted file (Kaggle submission ref 58390515, kept in `ref
 
 ### Hardware used
 
-The models were trained, and the first submission (58304440) produced, on one rented cloud GPU server:
+The models were trained on one rented cloud GPU server:
 
 | | |
 |---|---|
@@ -117,7 +105,7 @@ The models were trained, and the first submission (58304440) produced, on one re
 | Disk | 32 GB |
 | Software | Ubuntu 24.04, Python 3.12.3, PyTorch 2.8.0 with CUDA 12.8 |
 
-The final submission (58390515) was produced on a second machine, where the notebook rebuilds it byte for byte, from the same 40 downloaded models (inference, scorer,
+The submission (58390515) was produced on a second machine, where the notebook rebuilds it byte for byte, from the same 40 downloaded models (inference, scorer,
 selection and redraw only; nothing retrained): 2 x NVIDIA GeForce RTX 3080 (10 GB each), 4 CPU cores, 76 GB RAM, same PyTorch and CUDA
 versions. There a run takes about 1 h 40 min, most of it in the CPU steps.
 

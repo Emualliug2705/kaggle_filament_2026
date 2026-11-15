@@ -2,14 +2,12 @@
 the mean of the cnxL and r34 U-Net probability maps (test maps: mean of the 5 fold models), then the masks are
 repainted in the file's order (= selection priority). With core = erode(M, r), outer = dilate(M, r), band = outer - core:
 
-  blend (final, r = 2)   P is first moved 0.25 px towards the top of the photo (bilinear), where the annotators'
-                         outlines sit on average. The area of M' is then fixed before its pixels are chosen:
-                             area(M') = area(M) x clip(A_u / area(M), 0.8, 1.25) ^ 0.5,   A_u = area(core + (P > 0.5) in outer)
-                         i.e. the geometric mean of the Mask2Former area and the U-Net area, and M' = core + the band
-                         pixels with the highest P, up to that area.
-  threshold (previous)   M' = core + (P > t) inside outer,   t = the threshold at which this best reproduces M (0.10-0.90)
+  1. P is moved 0.25 px towards the top of the photo (bilinear), where the annotators' outlines sit on average.
+  2. The area of M' is fixed before its pixels are chosen, as the geometric mean of the Mask2Former area and the
+     U-Net area:   area(M') = area(M) x clip(A_u / area(M), 0.8, 1.25) ^ 0.5,   A_u = area(core + (P > 0.5) in outer)
+  3. M' = core + the band pixels with the highest P, up to that area.
 
-    python -m src.scorer.redraw in.csv out.csv [r=2] [blend|threshold]
+    python -m src.scorer.redraw in.csv out.csv [r=2]
 """
 import csv
 import json
@@ -25,32 +23,6 @@ from src.scorer.paint import paint
 
 ARCHES = tuple(os.environ.get("FILAMENT_REDRAW_ARCHES", "cnxL,r34").split(","))   # maps averaged for the redraw
 MAPS = Path(os.environ.get("FILAMENT_REDRAW_TEST_MAPS", str(paths.SCRATCH / "maps" / "test")))
-
-
-def redraw(mask, P, r, fixed=None):
-    import cv2
-    ys, xs = np.nonzero(mask)
-    pad = r + 2
-    y0, y1, x0, x1 = max(ys.min() - pad, 0), min(ys.max() + pad + 1, 2048), max(xs.min() - pad, 0), min(xs.max() + pad + 1, 2048)
-    m = mask[y0:y1, x0:x1]
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
-    core, outer = cv2.erode(m, k).astype(bool), cv2.dilate(m, k).astype(bool)
-    p = P[y0:y1, x0:x1].astype(np.float32) / 255
-    mb = m.astype(bool)
-    if fixed is None:
-        best, best_iou = 0.5, -1.0
-        for t in np.arange(0.10, 0.91, 0.05):
-            c = ((p > t) & outer) | core
-            iou = (c & mb).sum() / max((c | mb).sum(), 1)
-            if iou > best_iou:
-                best, best_iou = t, iou
-    else:
-        best = fixed
-    out = mask.copy()
-    out[y0:y1, x0:x1] = (((p > best) & outer) | core).astype(np.uint8)
-    return out
-
-
 SHIFT_DY = -0.25          # px; negative = towards row 0 (the top of the photo)
 AREA_WEIGHT = 0.5         # 0: the Mask2Former area is kept; 1: the U-Net area (inside outer) is taken
 AREA_CLIP = (0.8, 1.25)   # limits of the U-Net / Mask2Former area ratio before the blend
@@ -66,8 +38,8 @@ def shifted(p, dy=SHIFT_DY, dx=0.0):
                           borderMode=cv2.BORDER_REPLICATE)
 
 
-def redraw_blend(mask, P, r=2, dy=SHIFT_DY, weight=AREA_WEIGHT):
-    """The final rule (see the module text): P shifted by dy, area = geometric blend of the two areas, pixels by rank of P."""
+def redraw(mask, P, r=2, dy=SHIFT_DY, weight=AREA_WEIGHT):
+    """mask (2048 x 2048, 0/1) redrawn within r px from P (2048 x 2048, 0-255): see the module text."""
     import cv2
     ys, xs = np.nonzero(mask)
     pad = r + 8
@@ -92,18 +64,15 @@ def redraw_blend(mask, P, r=2, dy=SHIFT_DY, weight=AREA_WEIGHT):
     return out
 
 
-RULES = {"blend": redraw_blend, "threshold": redraw}
-
-
 def photo(job):
     from pycocotools import mask as mu
-    stem, rles, j, r, rule = job
+    stem, rles, j, r = job
     U = np.mean([np.asarray(np.load(MAPS / f"test{a}.npy", mmap_mode="r")[j, 0]).astype(np.float32) for a in ARCHES], 0)
     masks = [mu.decode(dict(size=[2048, 2048], counts=c.encode())) for c in rles]
-    return stem, [o["counts"].decode() for o in paint([RULES[rule](m, U, r) for m in masks])]
+    return stem, [o["counts"].decode() for o in paint([redraw(m, U, r) for m in masks])]
 
 
-def main(src, dst, r=2, rule="blend"):
+def main(src, dst, r=2):
     csv.field_size_limit(10 ** 9)
     files = json.loads((MAPS / "testcnxL.npy.json").read_text())["files"]
     assert files == json.loads((MAPS / "testr34.npy.json").read_text())["files"]
@@ -112,7 +81,7 @@ def main(src, dst, r=2, rule="blend"):
     for fid, c in list(csv.reader(open(src)))[1:]:
         stem, i = fid.rsplit("_", 1)
         by.setdefault(stem, []).append((int(i), c))
-    jobs = [(s, [c for _, c in sorted(v)], pos[s], r, rule) for s, v in sorted(by.items())]
+    jobs = [(s, [c for _, c in sorted(v)], pos[s], r) for s, v in sorted(by.items())]
     with ProcessPoolExecutor(int(os.environ.get("FILAMENT_CPUS", "24"))) as ex:
         res = dict(ex.map(photo, jobs, chunksize=2))
     with open(dst, "w", newline="") as fh:
@@ -120,8 +89,8 @@ def main(src, dst, r=2, rule="blend"):
         for s in sorted(res):
             for i, c in enumerate(res[s], start=1):
                 w.writerow([f"{s}_{i}", c])
-    print(f"{sum(len(v) for v in by.values())} masks -> {sum(map(len, res.values()))} masks (boundary within {r} px, {rule} rule) -> {dst}")
+    print(f"{sum(len(v) for v in by.values())} masks -> {sum(map(len, res.values()))} masks (boundary within {r} px) -> {dst}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 2, sys.argv[4] if len(sys.argv) > 4 else "blend")
+    main(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 2)

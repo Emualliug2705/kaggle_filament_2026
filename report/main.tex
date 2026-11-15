@@ -134,13 +134,13 @@ On test, the scorer is retrained on all OOF rows. The candidates of the 5 fold m
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.28\columnwidth]{figures/redraw_closeup.png}
-\caption{Boundary redraw on one test filament: the Mask2Former mask (white) and the mask after the final 2-pixel redraw from the U-Net maps (blue).}
+\includegraphics[width=0.32\columnwidth]{figures/redraw_closeup.png}
+\caption{Boundary redraw on one test filament: the Mask2Former mask (white) and the mask after the 2-pixel redraw from the U-Net maps (blue).}
 \label{fig:redraw}
 \Description{Close-up of one filament with two outlines, white before and blue after the redraw.}
 \end{figure}
 
-Mask2Former's masks come from quarter-resolution logits, while the U-Nets predict at full resolution. Each kept mask $M$ therefore keeps its extent, and its boundary is redrawn within $r = 2$ pixels from $P$, the mean of the probability maps of the 48k-step ConvNeXt-T and the ResNet-34 U-Nets, shifted by 0.25 pixel towards the top of the photograph, where the annotators' outlines sit on average. With $C = \mathrm{erode}(M, r)$ and $O = \mathrm{dilate}(M, r)$, the new mask $M'$ is $C$ plus the pixels of $O \setminus C$ with the highest $P$, up to an area set to the geometric mean of $|M|$ and of the U-Net area $|C \cup ((P > 0.5) \cap O)|$. The redrawn masks are painted again in decreasing $q$, and masks under 100 pixels are dropped. Our first submission instead kept $C \cup ((P > t) \cap O)$, with $r = 3$ and a threshold $t$ chosen per mask to best reproduce $M$.
+Mask2Former's masks come from quarter-resolution logits, while the U-Nets predict at full resolution. Each kept mask $M$ therefore keeps its extent, and its boundary is redrawn within $r = 2$ pixels from $P$, the mean of the probability maps of the 48k-step ConvNeXt-T and the ResNet-34 U-Nets, shifted by 0.25 pixel towards the top of the photograph, where the annotators' outlines sit on average. With $C = \mathrm{erode}(M, r)$ and $O = \mathrm{dilate}(M, r)$, the new mask $M'$ is $C$ plus the pixels of $O \setminus C$ with the highest $P$, up to an area set to the geometric mean of $|M|$ and of the U-Net area $|C \cup ((P > 0.5) \cap O)|$. The redrawn masks are painted again in decreasing $q$, and masks under 100 pixels are dropped.
 
 
 % ==================================== %
@@ -154,12 +154,12 @@ All numbers are OOF PQ over the 707 training observations: each annotator record
 All models are trained with PyTorch on GPUs with 12\,GB of memory. Mask2Former uses AdamW (learning rate $10^{-4}$, ten times lower for the backbone, weight decay 0.05), a 500-step warm-up followed by a cosine decay, and gradient clipping at a norm of 0.01; each crop is centred on a randomly chosen annotated filament and shifted at random by up to 35\% of the crop size, and every sample is randomly flipped, rotated by a multiple of $90^\circ$ and changed in gamma (by a factor of 0.8 to 1.25) and gain (0.85 to 1.15); we use the weights of the last epoch. The U-Nets train on 512-pixel crops (batch 8, AdamW, learning rate $2\cdot10^{-4}$ for the ImageNet encoder and $10^{-3}$ for the decoder, warm-up then cosine decay), with rotations by any angle, scaling by 0.9--1.1, blur, JPEG compression and intensity changes; we keep an exponential moving average of their weights (decay 0.999) and average their predictions over the 8 rotations and reflections. The Mask R-CNN trains with SGD (learning rate 0.01, batch 4), each sample showing the filaments of one randomly drawn annotator. The tiled detector trains for 15k steps (batch 4, AdamW, frozen batch-norm statistics) and its refiner for 30k steps (batch 8, BCE plus Dice loss).
 
 \subsection{Results}
-Table~\ref{tab:results} adds one step at a time on the same observations. The learned scorer is the largest single gain, and it needs the evidence models: on candidate numbers alone, it shows no visible difference or improvement over a fixed threshold on the same pool. Table~\ref{tab:evidence} adds the evidence blocks one at a time: the U-Net spine maps bring most of the gain, while the tiled detector adds nothing measurable. The second Mask2Former family adds little as well: the same pipeline on the grayscale family alone scores 0.4766, a difference of $-0.0004$ (95\% interval $-0.0028$ to $+0.0020$). The final pipeline scores \textbf{0.4783} (bootstrap standard deviation 0.0043, 95\% interval 0.4696--0.4865), well above the PQ of 0.340 at which two annotators of the same photograph agree. Its five folds score 0.4771, 0.4861, 0.4717, 0.4809 and 0.4757 (standard deviation 0.0055), so differences below about 0.004 between single rows are within noise; the paired intervals of Table~\ref{tab:results} are narrower because both arms share the same observations. On the public leaderboard, the first submission scores a PQ of 0.41 and the final one \textbf{0.42}. Out of fold, the final pipeline outputs 7,760 masks against the 8,199 annotated ones (counted per record): 5,526 are matched, with a mean IoU of 0.691. Fig.~\ref{fig:examples} shows OOF predictions and Fig.~\ref{fig:redraw} the boundary redraw.
+Table~\ref{tab:results} adds one step at a time on the same observations. The learned scorer is the largest single gain, and it needs the evidence models: on candidate numbers alone, it shows no visible difference or improvement over a fixed threshold on the same pool. Table~\ref{tab:evidence} adds the evidence blocks one at a time: the U-Net spine maps bring most of the gain, while the tiled detector adds nothing measurable. The second Mask2Former family adds little as well: on the grayscale family alone, the same pipeline differs by $-0.0004$ (95\% interval $-0.0028$ to $+0.0020$). The final pipeline scores \textbf{0.4783} (bootstrap standard deviation 0.0043, 95\% interval 0.4696--0.4865), well above the PQ of 0.340 at which two annotators of the same photograph agree. Its five folds score 0.4771, 0.4861, 0.4717, 0.4809 and 0.4757 (standard deviation 0.0055), so differences below about 0.004 between single rows are within noise; the paired intervals of Table~\ref{tab:results} are narrower because both arms share the same observations. On the public leaderboard, the submitted file scores a PQ of \textbf{0.42}. Out of fold, the final pipeline outputs 7,760 masks against the 8,199 annotated ones (counted per record): 5,526 are matched, with a mean IoU of 0.691. Fig.~\ref{fig:examples} shows OOF predictions and Fig.~\ref{fig:redraw} the boundary redraw.
 
 \begin{table}[t]
 \centering
 \small
-\caption{OOF PQ on the 707 training observations, adding one step at a time. $\Delta$: paired difference with the row above (last row: with the $r=3$ row), with its 95\% bootstrap interval. $\dagger$:~second run on other GPUs, where the $r=3$ row scores 0.4765.}
+\caption{OOF PQ on the 707 training observations, adding one step at a time. $\Delta$: paired difference with the row above (last row: with the two-family pipeline, measured with an earlier version of the redraw), with its 95\% bootstrap interval. $\dagger$:~second run on other GPUs, where the row above scores 0.4744.}
 \label{tab:results}
 % Delta cells on two lines: the difference, then its 95% interval below it.
 % Every cell is centred vertically in its row, so a one-line cell sits in the middle of a two-line row.
@@ -174,10 +174,9 @@ Grayscale family, single view, score~$>0.85$ & 0.4629 & -- \\
 Two families, 16-view pool, score $>0.75$ & 0.4693 & -- \\
 + learned scorer, exact selection (nested~$\tau$) & 0.4739 & \textbf{\boldmath\twoline{$+0.0046$}{{[}$+0.0014$, $+0.0076${]}}} \\
 \quad $\tau$ chosen on all folds & 0.4750 & -- \\
-+ boundary redraw, $r=3$ & 0.4770 & \twoline{$+0.0021$}{{[}$+0.0007$, $+0.0035${]}} \\
-+ shift and area blend in the redraw, $r=2$~$\dagger$ & \textbf{0.4783} & \twoline{$+0.0018$}{{[}$+0.0008$, $+0.0029${]}} \\
++ boundary redraw, $r=2$~$\dagger$ & \textbf{0.4783} & \twoline{$+0.0039$}{{[}$+0.0025$, $+0.0054${]}} \\
 \midrule
-Same pipeline, grayscale family only & 0.4766 & \twoline{$-0.0004$}{{[}$-0.0028$, $+0.0020${]}} \\
+Same pipeline, grayscale family only & -- & \twoline{$-0.0004$}{{[}$-0.0028$, $+0.0020${]}} \\
 \bottomrule
 \end{tabularx}
 \end{table}
