@@ -7,6 +7,7 @@
   <a href="https://www.kaggle.com/competitions/filament-segmentation-2026"><img src="https://img.shields.io/badge/Kaggle-filament--segmentation--2026-20BEFF?style=flat&logo=kaggle&logoColor=white" alt="Kaggle competition" /></a>
   <a href="#folds"><img src="https://img.shields.io/badge/OOF%20PQ-0.4801-brightgreen?style=flat" alt="Out-of-fold PQ 0.4801" /></a>
   <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Public%20LB%20PQ-0.42-5865F2?style=flat" alt="Public leaderboard PQ 0.42" /></a>
+  <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Private%20LB%20PQ-0.39%20%C2%B7%20rank%20117%20of%201567-orange?style=flat" alt="Private leaderboard PQ 0.39, rank 117 of 1567" /></a>
   <img src="https://img.shields.io/badge/Inter--annotator%20PQ-0.340-lightgrey?style=flat" alt="Inter-annotator PQ 0.340" />
   <br>
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white" alt="Python 3.12" />
@@ -39,7 +40,8 @@
   ROI detector check them; a LightGBM scorer predicts each candidate's IoU with the annotators (129 numbers per candidate); an exact
   integer program keeps the best non-overlapping set; and each kept boundary is redrawn at full resolution from the U-Net maps.
 * **Results.** Out-of-fold PQ **0.4801** on the 707 training photos (95 % interval **0.4714-0.4882**), against **0.4629** for one
-  Mask2Former with a fixed threshold and **0.340** between two annotators of the same photo. Public leaderboard PQ **0.42**.
+  Mask2Former with a fixed threshold and **0.340** between two annotators of the same photo. Final **private leaderboard PQ 0.39,
+  rank 117 of 1,567 teams** (public leaderboard: 0.42, rank 142).
 * **Reproducible.** `PIPELINE.ipynb` rebuilds the submitted file, **byte for byte** from the same U-Net maps: about **50 min** on
   4 x 12 GB GPUs with the 40 downloaded models, or about **115 GPU-hours** to retrain them all.
 
@@ -65,7 +67,9 @@ disagree, as above: 11 filaments for one, 7 for the other, and only some of them
 
 **Result: out-of-fold PQ 0.4801** on the 707 training photos (95% bootstrap interval 0.4714-0.4882; the five folds range from 0.4733 to
 0.4909). Each photo is predicted by models that never saw it during training (see [Folds](#folds)). On the public leaderboard the
-submission (ref 58424919) scores 0.42, like the previous one (ref 58390515, out-of-fold 0.4783).
+submission (ref 58424919) scores 0.42, like the previous one (ref 58390515, out-of-fold 0.4783). On the **private leaderboard** (final
+standing, competition closed on 2026-11-16) it scores **0.39**, **rank 117 of 1,567 teams** (the 20 teams at 0.39 hold ranks 114-133; the
+winning private score is 0.64).
 
 ![Out-of-fold PQ at each stage](reference/figures/score_progression.png)
 
