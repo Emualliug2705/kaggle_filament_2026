@@ -5,7 +5,6 @@ redraw_report.md in work/scorer/final.
 
     python -m src.scorer.redraw_oof        (radius: FILAMENT_REDRAW_RADIUS, default 2)
 """
-import json
 import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -18,7 +17,8 @@ from src.evaluation.oof import counts, native, pq  # noqa: E402
 from src.scorer import selector as S  # noqa: E402
 from src.scorer.oof_jobs import base_masks, boot, load_jobs  # noqa: E402
 from src.scorer.paint import paint  # noqa: E402
-from src.scorer.redraw import redraw  # noqa: E402
+from src.scorer.redraw import load_channel, redraw  # noqa: E402
+from src.utils.mapstore import map_files, map_path  # noqa: E402
 
 MAPS = Path(os.environ.get("FILAMENT_REDRAW_MAPS", str(paths.SCRATCH / "maps")))
 ARCHES = tuple(os.environ.get("FILAMENT_REDRAW_ARCHES", "cnxL,r34").split(","))   # maps averaged for the redraw
@@ -30,7 +30,7 @@ def photo(job):
     records, entries, q, ovl, tau, theta, upaths, j = job
     gts = [[native(r) for r in rec] for rec in records]
     base, masks = base_masks(entries, q, ovl, tau, theta)
-    U = np.mean([np.asarray(np.load(p, mmap_mode="r")[j, 0]).astype(np.float32) for p in upaths], 0)
+    U = np.mean([load_channel(p, j, 0) for p in upaths], 0)
 
     def total(pred):
         t = np.zeros(4)
@@ -46,8 +46,8 @@ def main():
     full = []
     for i, job in enumerate(jobs):
         k = int(fold[i])
-        up = [str(MAPS / f"train_f{k}" / f"test{a}.npy") for a in ARCHES]
-        files = json.loads(Path(up[0] + ".json").read_text())["files"]
+        up = [str(map_path(MAPS / f"train_f{k}", f"test{a}")) for a in ARCHES]
+        files = map_files(up[0])
         full.append(job + (up, files.index(names[i])))
     with ProcessPoolExecutor(S.PROCS) as ex:
         res = list(ex.map(photo, full, chunksize=2))

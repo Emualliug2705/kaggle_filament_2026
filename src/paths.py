@@ -12,7 +12,7 @@ def _folder(variable: str, default: Path) -> Path:
 DATA = _folder("FILAMENT_DATA", REPO / "data")             # folds.json; train/ and test/ from Kaggle
 MODELS = _folder("FILAMENT_MODELS", REPO / "models")       # one folder per trained model: {name}-f{fold}
 WORK = _folder("FILAMENT_WORK", REPO / "work")             # inference outputs and scorer tables
-SCRATCH = _folder("FILAMENT_SCRATCH", WORK / "scratch")    # large temporary arrays (U-Net maps, ~35 GB)
+SCRATCH = _folder("FILAMENT_SCRATCH", WORK / "scratch")    # U-Net maps (~0.3 GB, compressed); training cache (~8 GB, retraining only)
 OUTPUTS = _folder("FILAMENT_OUTPUTS", REPO / "outputs")    # submission, figures, logs
 DOWNLOADS = _folder("FILAMENT_DOWNLOADS", REPO / "downloads")  # downloaded archives (7.4 GB while extracting)
 CONFIGS = REPO / "configs"

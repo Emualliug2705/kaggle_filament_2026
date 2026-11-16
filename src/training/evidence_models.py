@@ -3,7 +3,8 @@ folds, trained on the user's folds, and their predictions.
 
     python -m src.training.evidence_models train [--gpus 0,1,2,3]   training cache, then the 20 trainings (done ones skipped)
     python -m src.training.evidence_models infer [--gpus 0,1,2,3]   Mask R-CNN candidate banks (work/banks/maskrcnn-f<k>) and
-                                                                    U-Net maps (scratch/maps: train_f<k> out of fold, test = mean of 5)
+                                                                    U-Net maps (scratch/maps/<unit>/test<src>.zip, compressed:
+                                                                    train_f<k> out of fold, test = mean of 5)
 
 Each fold k gets its own cache folder: the same arrays (links) and a meta.json whose fold is k for the user's fold-k photos
 and 9 for all others, so the trainers hold out exactly fold k.
@@ -158,39 +159,35 @@ def dense_job(src: str, fold: int) -> None:
     m = build_model(arch, enc, weights=None)
     m.load_state_dict(torch.load(MODELS / f"unet_{src}-f{fold}" / "ema.pt", map_location="cpu"))
     m = m.cuda().eval().to(memory_format=torch.channels_last)
+    from src.utils.mapstore import MapWriter, map_path
     for unit, names, images in ((f"train_f{fold}", names_of(fold), TRAIN_IMAGES), (f"test_part_f{fold}", names_of(None), TEST_IMAGES)):
-        out = SHM / "maps" / unit / f"test{src}.npy"
-        if Path(str(out) + ".json").is_file():
+        out = map_path(SHM / "maps" / unit, f"test{src}")             # compressed, lossless (src/utils/mapstore.py)
+        if out.is_file():
             continue
-        out.parent.mkdir(parents=True, exist_ok=True)
-        arr = np.lib.format.open_memmap(out, "w+", np.uint8, (len(names), 2, 2048, 2048))
-        with torch.no_grad():
+        with MapWriter(out, names) as w, torch.no_grad():
             for j, n in enumerate(names):
                 g = cv2.imread(str(images / n), cv2.IMREAD_GRAYSCALE)
                 mean, std, _ = disk_stats(g)
                 p = predict_full(m, torch.from_numpy(normalize(g, mean, std))[None, None].cuda())
-                arr[j] = (p.clamp(0, 1) * 255).round().byte().cpu().numpy()
-        arr.flush(); del arr
-        Path(str(out) + ".json").write_text(json.dumps({"files": names}))
+                w.write(j, (p.clamp(0, 1) * 255).round().byte().cpu().numpy())
 
 
 def average_test(src: str) -> None:
-    """test/test<src>.npy = round(mean of the 5 fold models' test maps); the per-fold parts are deleted."""
+    """test/test<src>.zip = round(mean of the 5 fold models' test maps); the per-fold parts are deleted."""
     import numpy as np
-    out = SHM / "maps" / "test" / f"test{src}.npy"
-    if Path(str(out) + ".json").is_file():
+    from src.utils.mapstore import MapWriter, map_path, open_maps
+    out = map_path(SHM / "maps" / "test", f"test{src}")
+    if out.is_file():
         return
-    parts = [SHM / "maps" / f"test_part_f{k}" / f"test{src}.npy" for k in range(5)]
-    arrs = [np.load(p, mmap_mode="r") for p in parts]
-    names = json.loads(Path(str(parts[0]) + ".json").read_text())["files"]
-    out.parent.mkdir(parents=True, exist_ok=True)
-    dst = np.lib.format.open_memmap(out, "w+", np.uint8, arrs[0].shape)
-    for j in range(len(names)):
-        dst[j] = np.round(np.mean([a[j].astype(np.float32) for a in arrs], 0)).astype(np.uint8)
-    dst.flush(); del dst, arrs
-    Path(str(out) + ".json").write_text(json.dumps({"files": names}))
-    for p in parts:
-        p.unlink(missing_ok=True); Path(str(p) + ".json").unlink(missing_ok=True)
+    parts = [map_path(SHM / "maps" / f"test_part_f{k}", f"test{src}") for k in range(5)]
+    sets = [open_maps(p) for p in parts]
+    names = sets[0].files
+    assert all(m.files == names for m in sets)
+    with MapWriter(out, names) as w:
+        for j in range(len(names)):
+            w.write(j, np.round(np.mean([m[j].astype(np.float32) for m in sets], 0)).astype(np.uint8))
+    for m, p in zip(sets, parts):
+        m.close(); p.unlink(missing_ok=True)
 
 
 def det_job(fold: int) -> None:
@@ -217,9 +214,9 @@ def infer_all(gpus=(0, 1, 2, 3)) -> None:
     jl = [(f"det_infer_f{k}", BANKS / f"maskrcnn-f{k}" / "test" / "manifest.json", 2, f"{me} det_job {k}") for k in range(5)]
     run_queue(jl, gpus)
     for src in ("cnxL", "r34", "cnx"):
-        jl = [(f"dense_infer_{src}_f{k}", SHM / "maps" / f"test_part_f{k}" / f"test{src}.npy.json", 2,
+        jl = [(f"dense_infer_{src}_f{k}", SHM / "maps" / f"test_part_f{k}" / f"test{src}.zip", 2,
                f"{me} dense_job {src} {k}") for k in range(5)
-              if not (SHM / "maps" / "test" / f"test{src}.npy.json").is_file()]
+              if not (SHM / "maps" / "test" / f"test{src}.zip").is_file()]
         run_queue(jl, gpus)
         average_test(src)
         log(f"maps of {src} done")

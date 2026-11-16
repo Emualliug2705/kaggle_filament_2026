@@ -10,7 +10,6 @@ repainted in the file's order (= selection priority). With core = erode(M, r), o
     python -m src.scorer.redraw in.csv out.csv [r=2]
 """
 import csv
-import json
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -20,6 +19,7 @@ import numpy as np
 
 from src import paths
 from src.scorer.paint import paint
+from src.utils.mapstore import map_files, map_path, open_maps
 
 ARCHES = tuple(os.environ.get("FILAMENT_REDRAW_ARCHES", "cnxL,r34").split(","))   # maps averaged for the redraw
 MAPS = Path(os.environ.get("FILAMENT_REDRAW_TEST_MAPS", str(paths.SCRATCH / "maps" / "test")))
@@ -64,18 +64,27 @@ def redraw(mask, P, r=2, dy=SHIFT_DY, weight=AREA_WEIGHT):
     return out
 
 
+def load_channel(path, j, c):
+    """Channel c of photo j of a compressed map set (src.utils.mapstore), float32."""
+    m = open_maps(path)
+    try:
+        return m.channel(j, c).astype(np.float32)
+    finally:
+        m.close()
+
+
 def photo(job):
     from pycocotools import mask as mu
     stem, rles, j, r = job
-    U = np.mean([np.asarray(np.load(MAPS / f"test{a}.npy", mmap_mode="r")[j, 0]).astype(np.float32) for a in ARCHES], 0)
+    U = np.mean([load_channel(map_path(MAPS, f"test{a}"), j, 0) for a in ARCHES], 0)
     masks = [mu.decode(dict(size=[2048, 2048], counts=c.encode())) for c in rles]
     return stem, [o["counts"].decode() for o in paint([redraw(m, U, r) for m in masks])]
 
 
 def main(src, dst, r=2):
     csv.field_size_limit(10 ** 9)
-    files = json.loads((MAPS / "testcnxL.npy.json").read_text())["files"]
-    assert files == json.loads((MAPS / "testr34.npy.json").read_text())["files"]
+    files = map_files(map_path(MAPS, f"test{ARCHES[0]}"))
+    assert all(map_files(map_path(MAPS, f"test{a}")) == files for a in ARCHES)
     pos = {Path(n).stem: j for j, n in enumerate(files)}
     by = {}
     for fid, c in list(csv.reader(open(src)))[1:]:

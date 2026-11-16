@@ -472,9 +472,11 @@ def map_features(job):
     blobs it touches relative to the mask, and the share of those blobs it covers)."""
     import cv2
     from pycocotools import mask as mu
+    from src.utils.mapstore import open_maps
     map_path, j, entries, ch = job
-    arr = np.load(map_path, mmap_mode="r")
-    P = np.asarray(arr[j] if ch is None else arr[j, ch])
+    maps = open_maps(map_path)
+    P = np.asarray(maps[j] if ch is None else maps.channel(j, ch))
+    maps.close()
     out = np.zeros((len(entries), len(PB_NAMES)), np.float32)
     if not len(entries):
         return out
@@ -510,7 +512,7 @@ def map_features(job):
 
 def extra_maps(block: str, oof_map, test_map):
     """Write work/scorer/extra_<block>_{oof,test_f<k>}.npy: map features aligned with the candidate rows.
-    oof_map(k) -> (npy path, file list, channel or None) of the out-of-fold maps of user fold k; test_map(k) -> the
+    oof_map(k) -> (map set path, file list, channel or None) of the out-of-fold maps of user fold k; test_map(k) -> the
     same for the test photos as seen with fold model k."""
     z = np.load(OUT / "oof_rows.npz", allow_pickle=True)
     names, fold = list(z["names"]), z["fold"]
@@ -539,11 +541,11 @@ def extra_maps(block: str, oof_map, test_map):
 
 
 def _assembled(root: Path, arch: str, ch: int):
-    """(oof_map, test_map) for the assembled U-Net maps <root>/{train_f<k>,test}/test<arch>.npy, channel ch.
-    Test photos: the map averaged over the fold models, the same for every fold model's candidates."""
-    files = lambda p: json.loads(Path(str(p) + ".json").read_text())["files"]      # noqa: E731
-    oof = lambda k: (root / f"train_f{k}" / f"test{arch}.npy", files(root / f"train_f{k}" / f"test{arch}.npy"), ch)  # noqa: E731
-    tst = lambda k: (root / "test" / f"test{arch}.npy", files(root / "test" / f"test{arch}.npy"), ch)               # noqa: E731
+    """(oof_map, test_map) for the assembled U-Net maps <root>/{train_f<k>,test}/test<arch>.zip (src.utils.mapstore),
+    channel ch. Test photos: the map averaged over the fold models, the same for every fold model's candidates."""
+    from src.utils.mapstore import map_files, map_path
+    oof = lambda k: (map_path(root / f"train_f{k}", f"test{arch}"), map_files(map_path(root / f"train_f{k}", f"test{arch}")), ch)  # noqa: E731
+    tst = lambda k: (map_path(root / "test", f"test{arch}"), map_files(map_path(root / "test", f"test{arch}")), ch)               # noqa: E731
     return oof, tst
 
 
