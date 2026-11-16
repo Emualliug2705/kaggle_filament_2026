@@ -2,10 +2,13 @@
 
 1. Candidates: the two-family pool of a fold on a photo (work/pools), 30 numbers each: the fused score, agreement with
    the single-view pool, shape, position, image contrast, competitors (overlapping candidates and their scores).
-   Evidence blocks add 46 more: Mask R-CNN agreement (maskrcnn, 5), each U-Net's spine map (spine_cnx / spine_cnxL /
-   spine_r34, 12 each) and the ROI detector + refiner agreement (roi, 5).
+   Evidence blocks add 99 more: Mask R-CNN agreement (maskrcnn, 5), each U-Net's spine map (spine_cnx / spine_cnxL /
+   spine_r34, 12 each), the ROI detector + refiner agreement (roi, 5), how stable the candidate is across the 16 raw
+   Mask2Former views (views, 17) and each U-Net's filament-probability map (prob_cnx / prob_cnxL / prob_r34, 12 each).
+   (Submission 58390515 used the first 76 numbers and 5 seeds: FILAMENT_SCORER_BLOCKS=maskrcnn,spine_cnx,spine_cnxL,
+   spine_r34,roi FILAMENT_SCORER_SEEDS=10,11,12,13,14.)
 2. Target: the mean over the photo's annotator records of the candidate's IoU with the filament it overlaps most,
-   counted only above 0.5. LightGBM regression (5 seeds), cross-fitted over the user's 5 folds: a photo is scored by a
+   counted only above 0.5. LightGBM regression (10 seeds), cross-fitted over the user's 5 folds: a photo is scored by a
    scorer that never saw its fold, on candidates from models that never saw it.
 3. Selection: the non-overlapping set maximising sum(q - tau) (exact, src.scorer.select), then the emission (painting
    in descending q, minimum area 100). tau and the overlap tolerance theta are chosen on out-of-fold PQ.
@@ -13,7 +16,7 @@
    candidates are fused (IoU link 0.5, pixel vote 0.5, q = mean of each model's best member) and selected with the
    out-of-fold tau and theta.
 
-    python -m src.scorer.selector features | evidence | roi_evidence | fit | test | ensemble   (in this order)
+    python -m src.scorer.selector features | evidence | roi_evidence | views | prob | fit | test | ensemble   (in order)
     -> work/scorer/ (tables) and work/scorer/final/ (out-of-fold report, test files)
 """
 from __future__ import annotations
@@ -54,7 +57,7 @@ H = W = 2048
 FEATURES = ["s_d4", "s_sv", "iou_sv", "n_sv50", "s_sv_max50", "ratio", "log_area", "bw", "bh", "aspect", "fill",
             "major", "minor", "elong", "radius", "i_mean", "i_std", "ring_contrast", "rank", "n_cand", "n_strong",
             "ovl_hi", "s_hi", "n_ovl", "s_ovl_sum", "iou_max", "s_iou_max", "s_rel", "area_rank", "sv_area_ratio"]
-SEEDS = [10, 11, 12, 13, 14]
+SEEDS = [int(s) for s in os.environ.get("FILAMENT_SCORER_SEEDS", ",".join(map(str, range(10, 20)))).split(",")]
 LGBM = dict(objective="regression", learning_rate=0.05, num_leaves=15, min_data_in_leaf=60, feature_fraction=0.8,
             bagging_fraction=0.8, bagging_freq=1, lambda_l2=1.0, verbose=-1, num_threads=16)
 ROUNDS = 300
@@ -196,7 +199,7 @@ def build_features():
         print(f"test rows fold model {k}: {sum(len(r[1]) for r in res)} candidates", flush=True)
 
 
-BLOCKS = "maskrcnn,spine_cnx,spine_cnxL,spine_r34,roi"                     # the evidence blocks of the final scorer, in order
+BLOCKS = "maskrcnn,spine_cnx,spine_cnxL,spine_r34,roi,views,prob_cnx,prob_cnxL,prob_r34"   # evidence blocks of the final scorer, in order
 EXTRA = [e for e in os.environ.get("FILAMENT_SCORER_BLOCKS", BLOCKS).split(",") if e]
 TAG = "final"                                                               # outputs go to work/scorer/final/
 
@@ -634,6 +637,83 @@ def roi_evidence():
     print("extra block roi: 5 features written", flush=True)
 
 
+# ------------------------------------------------------------------- extra block: agreement of the 16 raw views
+VIEWS = paths.WORK / "views"                       # the 8 raw views of each Mask2Former family (work/views/<family>/)
+VIEW_NAMES = [f"{fam}_{n}" for fam in ("gray", "limb") for n in ("n_sup", "iou_mean", "iou_min_sup", "s_mean", "s_max",
+                                                                   "s_std", "area_std")] + ["iou_gray_minus_limb", "sup_both", "n_iou75"]
+
+
+def view_features(job):
+    """How the 16 raw views (8 per family) support each candidate of one photo. Per family: views with a detection at
+    IoU > 0.5; mean over views of the best IoU (0 if none: how stable the outline is from view to view); the lowest
+    best IoU among supporting views; mean / max / std of the score of each view's best-IoU detection; spread of the
+    supporting detections' areas relative to the candidate. Then: gray minus limb mean best IoU, the product of the
+    two families' support counts / 64, and the number of views at IoU > 0.75."""
+    from pycocotools import mask as mu
+    entries, fams = job
+    X = np.zeros((len(entries), len(VIEW_NAMES)), np.float32)
+    if not entries:
+        return X
+    cand = [native(e["rle"]) for e in entries]
+    ca = areas(cand)
+    hi75 = np.zeros(len(cand))
+    for fi, rows in enumerate(fams):
+        best = np.zeros((len(cand), 8)); sc = np.zeros((len(cand), 8)); ar = np.full((len(cand), 8), np.nan)
+        for v in range(8):
+            r = [x for x in rows if x[0] == v]
+            if not r:
+                continue
+            det = [dict(size=[H, W], counts=x[2].encode()) for x in r]
+            s, a = np.array([x[1] for x in r]), areas(det)
+            iou = np.asarray(mu.iou(cand, det, [0] * len(det)))
+            j, b = iou.argmax(1), iou.max(1)
+            best[:, v] = b; sc[:, v] = s[j] * (b > 0); ar[:, v] = np.where(b > 0.5, a[j], np.nan)
+        sup = best > 0.5
+        hi75 += (best > 0.75).sum(1)
+        o = 7 * fi
+        X[:, o] = sup.sum(1); X[:, o + 1] = best.mean(1)
+        X[:, o + 2] = np.where(sup.any(1), np.where(sup, best, 1).min(1), 0)
+        X[:, o + 3] = sc.mean(1); X[:, o + 4] = sc.max(1); X[:, o + 5] = sc.std(1)
+        n = np.isfinite(ar).sum(1)
+        mean = np.where(n > 0, np.nansum(ar, 1) / np.maximum(n, 1), 0)
+        var = np.where(n > 0, np.nansum((ar - mean[:, None]) ** 2, 1) / np.maximum(n, 1), 0)
+        X[:, o + 6] = np.sqrt(var) / ca
+    X[:, 14] = X[:, 1] - X[:, 8]; X[:, 15] = X[:, 0] * X[:, 7] / 64; X[:, 16] = hi75
+    return X
+
+
+def views_evidence():
+    """Block views (17 numbers, view_features) for the out-of-fold rows and each fold model's test rows."""
+    def raw(k, split):
+        return [json.loads((VIEWS / f / f"fold{k}_{split}.json").read_text()) for f in ("mask2former", "mask2former_limb")]
+    z = np.load(OUT / "oof_rows.npz", allow_pickle=True)
+    jobs = []
+    for k in range(5):
+        d4 = json.loads(d4_path(k, "val").read_text()); a, b = raw(k, "val")
+        jobs += [(d4[n], (a[n], b[n])) for n, f in zip(z["names"], z["fold"]) if f == k]
+    with ProcessPoolExecutor(PROCS) as ex:
+        X = np.concatenate(list(ex.map(view_features, jobs, chunksize=2)))
+    assert len(X) == len(z["X"])
+    np.save(OUT / "extra_views_oof.npy", X)
+    for k in range(5):
+        t = np.load(OUT / f"test_rows_f{k}.npz", allow_pickle=True)
+        d4 = json.loads(d4_path(k, "test").read_text()); a, b = raw(k, "test")
+        with ProcessPoolExecutor(PROCS) as ex:
+            X = np.concatenate(list(ex.map(view_features, [(d4[n], (a[n], b[n])) for n in t["names"]], chunksize=2)))
+        assert len(X) == len(t["X"])
+        np.save(OUT / f"extra_views_test_f{k}.npy", X)
+    print(f"extra block views: {len(VIEW_NAMES)} features written", flush=True)
+
+
+# ------------------------------------------------------------- extra block: U-Net filament-probability channel
+def prob_evidence():
+    """Blocks prob_<arch>: the 12 map_features numbers on the probability channel (0) of each U-Net (the spine blocks
+    use channel 1). Out of fold: the fold model's map; test: the map averaged over the 5 fold models."""
+    for arch in ("cnx", "cnxL", "r34"):
+        if not (OUT / f"extra_prob_{arch}_oof.npy").is_file():
+            extra_maps(f"prob_{arch}", *_assembled(MAPS, arch, 0))
+
+
 if __name__ == "__main__":
-    {"features": build_features, "evidence": evidence, "roi_evidence": roi_evidence, "fit": fit, "test": test,
-     "ensemble": ensemble}[sys.argv[1]]()
+    {"features": build_features, "evidence": evidence, "roi_evidence": roi_evidence, "views": views_evidence,
+     "prob": prob_evidence, "fit": fit, "test": test, "ensemble": ensemble}[sys.argv[1]]()

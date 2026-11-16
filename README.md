@@ -13,9 +13,9 @@ counts only if it overlaps that annotator's filament by more than half (IoU > 0.
 The training set has 707 photos with 1,154 annotator records (one to three annotators per photo, 8,199 filaments). Annotators often
 disagree, as above: 11 filaments for one, 7 for the other, and only some of them in common.
 
-**Result: out-of-fold PQ 0.4783** on the 707 training photos (95% bootstrap interval 0.4696-0.4865; the five folds range from 0.4717 to
-0.4861). Each photo is predicted by models that never saw it during training (see [Folds](#folds)). On the public leaderboard the
-submission (ref 58390515) scores 0.42.
+**Result: out-of-fold PQ 0.4801** on the 707 training photos (95% bootstrap interval 0.4714-0.4882; the five folds range from 0.4733 to
+0.4909). Each photo is predicted by models that never saw it during training (see [Folds](#folds)). On the public leaderboard the
+submission (ref 58424919) scores 0.42, like the previous one (ref 58390515, out-of-fold 0.4783).
 
 ![Out-of-fold PQ at each stage](reference/figures/score_progression.png)
 
@@ -27,7 +27,7 @@ submission (ref 58390515) scores 0.42.
         ──► Mask R-CNN + 3 U-Nets (5 folds) ──► detector candidates, probability + spine maps ──┐
         ──► ROI detector + refiner (5 folds) ──► ROI candidates ────────────────────────────────┤
                                                                                                   ▼
-   76 numbers per candidate ──► LightGBM scorer q (expected matched IoU) ──► on test, 5 fold models fused
+  129 numbers per candidate ──► LightGBM scorer q (expected matched IoU) ──► on test, 5 fold models fused
    ──► exact non-overlapping selection ──► boundaries redrawn within 2 px from the U-Net maps ──► submission.csv
 ```
 
@@ -36,9 +36,10 @@ submission (ref 58390515) scores 0.42.
    8 rotated / mirrored views, and the 16 views of a fold's two models are fused into one candidate pool.
 2. **Evidence.** Independent models trained on the same folds check each candidate: a Mask R-CNN, three U-Nets (filament probability and
    centre-line maps), and a tiled ROI detector with a mask refiner.
-3. **Learned scorer.** LightGBM predicts, for each candidate, its expected IoU with the annotators' filaments. It uses 76 numbers: shape,
-   scores, image contrast, competing candidates and agreement with every evidence model. It is cross-fitted: every training photo is scored
-   by a model that never saw its fold, on candidates from models that never saw it.
+3. **Learned scorer.** LightGBM predicts, for each candidate, its expected IoU with the annotators' filaments. It uses 129 numbers: shape,
+   scores, image contrast, competing candidates, agreement with every evidence model, how stable the candidate's outline is across the
+   16 raw Mask2Former views, and what each U-Net's probability and spine maps say inside and around it. It is averaged over 10 seeds and
+   cross-fitted: every training photo is scored by a model that never saw its fold, on candidates from models that never saw it.
 4. **Selection.** Among a photo's candidates, the set maximising the sum of (q - tau) with no two masks overlapping by more than 10 % of
    the smaller one, solved exactly (integer programming). On test, the 5 fold models' candidates are fused first.
 5. **Full-resolution boundaries.** Mask2Former masks come out at 1/4 resolution. Each kept mask keeps its extent, and its boundary is redrawn
@@ -48,8 +49,18 @@ submission (ref 58390515) scores 0.42.
    * **Area blend.** The new mask's area is the geometric mean of the Mask2Former area and the U-Net area (the U-Net blob above 0.5
      inside the 2 px band, ratio limited to 0.8-1.25); the band pixels with the highest probability are kept up to that area.
 
-The models, epochs, scorer settings, selection threshold and redraw rule are chosen on out-of-fold PQ. The boundary redraw adds +0.0039
-to the masks as emitted (0.4744 to 0.4783, 95% interval +0.0025 to +0.0054).
+The models, epochs, scorer settings, selection threshold (tau 0.25) and redraw rule are chosen on out-of-fold PQ. The boundary redraw adds
++0.0041 to the masks as emitted (0.4760 to 0.4801, 95% interval +0.0026 to +0.0055).
+
+**Scorer update (after submission 58390515).** Two blocks were added to the scorer, both read from outputs the models already produce
+(nothing was retrained): the agreement of each candidate with the 16 raw views (17 numbers: in how many views it appears, how much its
+outline moves from view to view, the spread of the views' scores and areas) and the 3 U-Nets' filament-probability maps (12 numbers each,
+as for their spine maps). With 10 seeds instead of 5, out-of-fold PQ goes from 0.4783 to 0.4801 (+0.0018, paired 95% interval -0.0004 to
++0.0039; better in 3 of 5 folds). The scorer now recognises more of its weak candidates, so the chosen tau rises from 0.225 to 0.25: out of
+fold, 265 fewer false positives (1,969) for 117 fewer matches (5,409). Changing only the scorer's seeds moves out-of-fold PQ by about
+0.0005, so the gain was checked on two independent sets of 10 seeds (+0.0010 and +0.0013 on the masks as emitted, averaged over tau
+0.2-0.275). Not kept, as they showed no gain out of fold: candidates from the Mask R-CNN and ROI banks added to the pool, a threshold or
+boundary shift per year, site or hour, crescent-shape features, a second-stage scorer, and the ROI refiner's own mask statistics.
 
 ![Out-of-fold predictions on training photos](reference/figures/oof_predictions.png)
 
@@ -72,15 +83,15 @@ Every model uses the same 5 folds, fixed in `data/folds.json` (142, 142, 141, 14
 
 | Fold | 0 | 1 | 2 | 3 | 4 | All 707 photos |
 |---|---|---|---|---|---|---|
-| Out-of-fold PQ of the final pipeline | 0.4771 | 0.4861 | 0.4717 | 0.4809 | 0.4757 | 0.4783 |
+| Out-of-fold PQ of the final pipeline | 0.4733 | 0.4909 | 0.4775 | 0.4825 | 0.4755 | 0.4801 |
 
-The spread between folds (sd 0.0055) comes from the photos each fold holds, not from better or worse models: the five fold models are
+The spread between folds (sd 0.0070) comes from the photos each fold holds, not from better or worse models: the five fold models are
 trained the same way.
 
 ## Reproducing the result
 
 `PIPELINE.ipynb` runs the whole pipeline, from the photos to `outputs/submission.csv`, with every step explained. Its last check compares
-the result with the submitted file (Kaggle submission ref 58390515, kept in `reference/submission.csv`): by SHA-256, then mask by mask.
+the result with the submitted file (Kaggle submission ref 58424919, kept in `reference/submission.csv`): by SHA-256, then mask by mask.
 
 * **What to expect.** From the same U-Net maps, the selection and the redraw rebuild the submitted file **byte for byte**. The U-Net maps
   themselves are recomputed by the notebook, and they were not bit-identical between our two machines: for an earlier version of the
@@ -90,7 +101,7 @@ the result with the submitted file (Kaggle submission ref 58390515, kept in `ref
   changed model is listed with its training time, and retrained only after you confirm.
 * **Training.** The training code was checked against the original runs: same losses at the first steps (to the digit for the ROI models,
   within GPU rounding noise for Mask2Former).
-* **Time.** With the downloaded models, a run takes about 45 min on 4 x 12 GB GPUs (U-Net maps, then ~15 min of CPU for the scorer and
+* **Time.** With the downloaded models, a run takes about 50 min on 4 x 12 GB GPUs (U-Net maps, then ~20 min of CPU for the scorer and
   redraw). Retraining all 40 models takes about 115 GPU-hours, about 28 h on 4 x 12 GB GPUs (details below).
 
 ### Hardware used
@@ -105,7 +116,7 @@ The models were trained on one rented cloud GPU server:
 | Disk | 32 GB |
 | Software | Ubuntu 24.04, Python 3.12.3, PyTorch 2.8.0 with CUDA 12.8 |
 
-The submission (58390515) was produced on a second machine, where the notebook rebuilds it byte for byte, from the same 40 downloaded models (inference, scorer,
+The submissions (58424919, and 58390515 before it) were produced on a second machine, where the notebook rebuilds the latest byte for byte, from the same 40 downloaded models (inference, scorer,
 selection and redraw only; nothing retrained): 2 x NVIDIA GeForce RTX 3080 (10 GB each), 4 CPU cores, 76 GB RAM, same PyTorch and CUDA
 versions. There a run takes about 1 h 40 min, most of it in the CPU steps.
 

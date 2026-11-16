@@ -25,7 +25,7 @@
         <mxCell id="evidence" value="Evidence models (5 folds each):&lt;br&gt;Mask R-CNN; 3 U-Nets&lt;br&gt;(probability + spine);&lt;br&gt;ROI detector + refiner" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e3f5ee;strokeColor=#1baf7a;strokeWidth=1.5;fontFamily=Helvetica;fontSize=12;fontColor=#1a1a1a;" vertex="1" parent="1">
           <mxGeometry x="149" y="212" width="245" height="97" as="geometry" />
         </mxCell>
-        <mxCell id="features" value="76 numbers per&lt;br&gt;candidate: shape,&lt;br&gt;scores, contrast,&lt;br&gt;agreement with&lt;br&gt;evidence models" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e3f5ee;strokeColor=#1baf7a;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
+        <mxCell id="features" value="129 numbers per&lt;br&gt;candidate: shape,&lt;br&gt;scores, contrast,&lt;br&gt;agreement with&lt;br&gt;evidence models" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=20;fillColor=#e3f5ee;strokeColor=#1baf7a;strokeWidth=1.5;fontFamily=Helvetica;fontSize=13;fontColor=#1a1a1a;" vertex="1" parent="1">
           <mxGeometry x="438" y="202" width="154" height="117" as="geometry" />
         </mxCell>
 

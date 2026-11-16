@@ -39,7 +39,7 @@
   \node[cand=1.95cm] (fuse) at (6.85,2.65) {fuse the 16 views\\(IoU link 0.5,\\pixel vote)\\$=$ candidate pool};
 
   % ---- 3 Selection --------------------------------------------------------------------------------
-  \node[sel] (feat) at (9.80,3.70) {76 numbers per\\candidate: shape,\\scores, contrast,\\agreement with\\evidence models};
+  \node[sel] (feat) at (9.80,3.70) {129 numbers per\\candidate: shape,\\scores, contrast,\\agreement with\\evidence models};
   \node[sel] (evid) at (9.80,1.00) {evidence models\\(5 folds each):\\Mask R-CNN, 3 U-Nets\\(probability, spine),\\tiled detector};
   \node[sel] (scor) at (12.85,4.10) {LightGBM scorer\\$q$ = expected\\matched IoU};
   \node[sel] (selx) at (12.85,2.62) {exact selection\\max $\sum(q-\tau)$,\\overlap $<\theta$};
