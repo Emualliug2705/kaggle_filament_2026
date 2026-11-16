@@ -229,6 +229,7 @@ data/folds.json     the 5 folds (photos and annotations are downloaded)
 reference/          checksums, download sources, the submitted file and its SHA-256, epoch table, figures
 report/             the competition report (LaTeX, first draft)
 submission/         the final submitted file (Kaggle ref 58424919) and the report PDF
+kaggle_writeup/      the competition writeup: title, subtitle, URL, thumbnail cards, content
 models/  work/  outputs/  downloads/     created by the notebook (git-ignored)
 ```
 

@@ -1,0 +1,1 @@
+Mask2Former candidates, a LightGBM scorer trained on PQ's own question, and an exact integer-program selection (OOF 0.4801, private 0.39)
