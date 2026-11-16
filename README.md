@@ -163,19 +163,29 @@ What each fold's UI shows (experiment `{family}-f{K}`, folder `models/{family}-f
 python -m src.training.weightslab_global            # http://localhost:8099, Ctrl+C to stop
 ```
 
-It reads every run under `models/` (never modifies them; a run still training is read from a copy) and rebuilds
-`models/_weightslab_global/`:
-* **All curves**, one per fold.
-* **The 707 photos once**, with tags `fold0` … `fold4` = train | val, ground truth, and each photo's out-of-fold
-  prediction (latest evaluation of the fold that held it out).
-* **Per-family per-photo columns**:
+It opens `models/` read-only (WeightsLab's `checkpoint_manager.read_only`, in the `feat/multi-experiment-root` branch
+of WeightsLab) and creates no experiment of its own:
+* **Current experiment: the most recently updated run.** Its last state is loaded: its per-photo signals
+  (`train/photo_*`, `val/photo_*` last values), tags, seen counts, and its prediction masks (latest evaluation, its
+  held-out photos, from `e###_pred2048.npz`), over the ground truth.
+* **Any other run, on request**: plots board → runs popup → restore (or click a run's marker). Its own last state
+  replaces the grid's the same way: its signals, its tags, its predictions.
+* **All curves**, one per run.
+* **The 707 photos once**, with tags `fold0` … `fold4` = train | val and the ground truth.
+* **Per-family per-photo columns**, shown whatever run is loaded:
   * `{family}/oof_pq`, `oof_tp`, `oof_fp`, `oof_fn`: from the one fold that held the photo out, at its last
     evaluation.
   * `{family}/train_loss`, `train_cross_entropy`, `train_mask`, `train_dice`: averaged over the four folds that trained
     on it (last 10 % of steps).
-* Every fold's per-photo trajectories.
+* Every run's per-photo trajectories.
 
-Each run writes `weightslab_ids.json` (photo → WeightsLab id), and the global view matches runs through these files, by
+Nothing is written into the runs (a run still training is read from a copy of its database). The viewer's own files
+(its data view, logs, audit log, notebook) go to `models/_weightslab_global/`, rebuilt at each start. A run's last
+per-photo state is its WeightsLab data store (`checkpoints/data/data.h5`, with `arrays.h5` for the masks) or, when only
+that was copied back from the training machine, its dataframe export (`{hash}_dataframe.parquet`, written when training
+ends).
+
+Each run writes `weightslab_ids.json` (photo → WeightsLab id), and the pooled columns match runs through these files, by
 photo name.
 
 Settings (environment): `FILAMENT_WEIGHTSLAB=0` turns it off (it is also off when the package is not installed);
