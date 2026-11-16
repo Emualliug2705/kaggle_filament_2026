@@ -1,5 +1,47 @@
-# kaggle_filament_2026
-Code of our solution to the Kaggle competition filament-segmentation-2026: training, inference and the final submission.
+<div align="center">
+  <h1>Kaggle Filament Challenge - 2026</h1>
+  <p>Our solution to the Kaggle competition <i>filament-segmentation-2026</i>:<br>training, inference and the final submission, reproducible from one notebook.</p>
+</div>
+
+<div align="center">
+  <a href="https://www.kaggle.com/competitions/filament-segmentation-2026"><img src="https://img.shields.io/badge/Kaggle-filament--segmentation--2026-20BEFF?style=flat&logo=kaggle&logoColor=white" alt="Kaggle competition" /></a>
+  <a href="#folds"><img src="https://img.shields.io/badge/OOF%20PQ-0.4801-brightgreen?style=flat" alt="Out-of-fold PQ 0.4801" /></a>
+  <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Public%20LB%20PQ-0.42-5865F2?style=flat" alt="Public leaderboard PQ 0.42" /></a>
+  <img src="https://img.shields.io/badge/Inter--annotator%20PQ-0.340-lightgrey?style=flat" alt="Inter-annotator PQ 0.340" />
+  <br>
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/PyTorch-2.8-EE4C2C?style=flat&logo=pytorch&logoColor=white" alt="PyTorch 2.8" />
+  <img src="https://img.shields.io/badge/CUDA-12.8-76B900?style=flat&logo=nvidia&logoColor=white" alt="CUDA 12.8" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=flat" alt="License AGPL-3.0" /></a>
+</div>
+
+<p align="center">
+  <a href="https://www.kaggle.com/competitions/filament-segmentation-2026">Competition</a>
+  ·
+  <a href="report/main.pdf">Report (PDF)</a>
+  ·
+  <a href="PIPELINE.ipynb">Pipeline notebook</a>
+  ·
+  <a href="#reproducing-the-result">Reproduce</a>
+  ·
+  <a href="https://drive.google.com/file/d/1OV9XdvO7Py1zkZEmGnV6gbC_ZS2vmQlQ/view?usp=sharing">Trained models (7.4 GB)</a>
+</p>
+
+<br>
+
+## TL;DR
+
+* **Task.** Outline every solar filament as its own mask in 2048 x 2048 full-disk H-alpha photos. Entries are scored by panoptic
+  quality (PQ, IoU > 0.5) against each annotator's drawing separately, and the annotators often disagree.
+* **Idea.** Finding filaments is not the bottleneck: our first model already proposes a candidate for 85-89 % of the annotated ones.
+  We therefore spent our effort on *choosing* which candidates to submit.
+* **What we built.** Two Mask2Former families over 16 test-time views produce the candidates; a Mask R-CNN, three U-Nets and a tiled
+  ROI detector check them; a LightGBM scorer predicts each candidate's IoU with the annotators (129 numbers per candidate); an exact
+  integer program keeps the best non-overlapping set; and each kept boundary is redrawn at full resolution from the U-Net maps.
+* **Results.** Out-of-fold PQ **0.4801** on the 707 training photos (95 % interval **0.4714-0.4882**), against **0.4629** for one
+  Mask2Former with a fixed threshold and **0.340** between two annotators of the same photo. Public leaderboard PQ **0.42**.
+* **Reproducible.** `PIPELINE.ipynb` rebuilds the submitted file, **byte for byte** from the same U-Net maps: about **50 min** on
+  4 x 12 GB GPUs with the 40 downloaded models, or about **115 GPU-hours** to retrain them all.
 
 ## Solar filament instance segmentation
 
