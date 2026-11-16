@@ -43,6 +43,14 @@
 * **Reproducible.** `PIPELINE.ipynb` rebuilds the submitted file, **byte for byte** from the same U-Net maps: about **50 min** on
   4 x 12 GB GPUs with the 40 downloaded models, or about **115 GPU-hours** to retrain them all.
 
+## Monitored with WeightsLab
+
+The experiment was fully monitored with [WeightsLab](https://github.com/GrayboxTech/weightslab): the training curves of every run side by
+side, and the 707 training photos browsed with their annotations and predicted filaments overlaid. WeightsLab was used for monitoring only;
+it is not needed to reproduce the result.
+
+![The Mask2Former runs monitored in WeightsLab](reference/figures/weightslab_monitoring.png)
+
 ## Solar filament instance segmentation
 
 Solar filaments are dark, elongated clouds of cool plasma seen against the Sun's disk in H-alpha. The task
