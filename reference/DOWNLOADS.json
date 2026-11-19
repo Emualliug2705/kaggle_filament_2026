@@ -1,6 +1,12 @@
 {
- "_comment": "Where section 0.1 of PIPELINE.ipynb downloads what is missing. gdrive: the Google Drive link or file id of filament_models.tar (shared as \"Anyone with the link\"); or kaggle_dataset: a private Kaggle dataset holding it; or put the file in downloads/.",
+ "_comment": "Where section 0.1 of PIPELINE.ipynb downloads what is missing. data: the competition data as data.zip on Google Drive (\"Anyone with the link\"), SHA-256 checked; the Kaggle API is the fallback. gdrive: the Google Drive link or file id of filament_models.tar (shared as \"Anyone with the link\"); or kaggle_dataset: a private Kaggle dataset holding it; or put the file in downloads/.",
  "kaggle_competition": "filament-segmentation-2026",
+ "data": {
+  "name": "data.zip",
+  "gdrive": "https://drive.google.com/file/d/1rK0HbZ-Yrzyxh4IBv74hSmkZMZhuJLpY/view?usp=sharing",
+  "sha256": "56d8cd2927859fa7df72bd28ad1586f53c5814df6f81db02e755223e430657df",
+  "size_bytes": 703574877
+ },
  "gdrive": "https://drive.google.com/file/d/1OV9XdvO7Py1zkZEmGnV6gbC_ZS2vmQlQ/view?usp=sharing",
  "kaggle_dataset": "",
  "archive": {
