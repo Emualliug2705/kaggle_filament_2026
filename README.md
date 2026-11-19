@@ -7,7 +7,7 @@
   <a href="https://www.kaggle.com/competitions/filament-segmentation-2026"><img src="https://img.shields.io/badge/Kaggle-filament--segmentation--2026-20BEFF?style=flat&logo=kaggle&logoColor=white" alt="Kaggle competition" /></a>
   <a href="#folds"><img src="https://img.shields.io/badge/OOF%20PQ-0.4801-brightgreen?style=flat" alt="Out-of-fold PQ 0.4801" /></a>
   <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Public%20LB%20PQ-0.42-5865F2?style=flat" alt="Public leaderboard PQ 0.42" /></a>
-  <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Private%20LB%20PQ-0.39%20%C2%B7%20rank%20117%20of%201567-orange?style=flat" alt="Private leaderboard PQ 0.39, rank 117 of 1567" /></a>
+  <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Private%20LB%20PQ-0.39%20%C2%B7%20rank%20117%20of%201567-orange?style=flat" alt="Private leaderboard PQ 0.39, rank 10 of 1,708" /></a>
   <img src="https://img.shields.io/badge/Inter--annotator%20PQ-0.340-lightgrey?style=flat" alt="Inter-annotator PQ 0.340" />
   <br>
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white" alt="Python 3.12" />
