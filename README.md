@@ -4,7 +4,14 @@
 </div>
 
 <div align="center">
-  <a href="https://www.kaggle.com/competitions/filament-segmentation-2026"><img src="https://img.shields.io/badge/Kaggle-filament--segmentation--2026-20BEFF?style=flat&logo=kaggle&logoColor=white" alt="Kaggle competition" /></a>
+  <p align="center">
+    <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/writeups/multi-family-mask2former-approach" target="_blank">
+      <img src="https://img.shields.io/badge/Kaggle-%2310%20Leaderboard%20Solution-20BEFF?style=for-the-badge&logo=kaggle&logoColor=white" alt="Kaggle — #10 Leaderboard Solution" height="40"/>
+    </a>
+  </p>
+</div>
+
+<div align="center">
   <a href="#folds"><img src="https://img.shields.io/badge/OOF%20PQ-0.4801-brightgreen?style=flat" alt="Out-of-fold PQ 0.4801" /></a>
   <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Public%20LB%20PQ-0.42-5865F2?style=flat" alt="Public leaderboard PQ 0.42" /></a>
   <a href="https://www.kaggle.com/competitions/filament-segmentation-2026/leaderboard"><img src="https://img.shields.io/badge/Private%20LB%20PQ-0.39%20%C2%B7%20rank%2010%20of%201708-orange?style=flat" alt="Private leaderboard PQ 0.39, rank 10 of 1,708" /></a>
