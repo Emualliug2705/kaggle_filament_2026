@@ -35,7 +35,6 @@
   <a href="https://drive.google.com/file/d/1OV9XdvO7Py1zkZEmGnV6gbC_ZS2vmQlQ/view?usp=sharing">Trained models (7.4 GB)</a>
 </p>
 
-<br>
 
 ## TL;DR
 
