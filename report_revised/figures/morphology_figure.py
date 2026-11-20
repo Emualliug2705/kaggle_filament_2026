@@ -1,6 +1,6 @@
 """Fig. "morphology" of the report: submitted test masks drawn on their H-alpha photographs.
 
-One full disk (each mask outlined in its own colour) and zoomed crops chosen to show the typical shapes.
+One row: a full disk (each mask outlined in its own colour) and zoomed crops chosen to show the typical shapes.
 
     python morphology_figure.py SUBMISSION.csv TEST_IMAGES/ OUT.png DISK_STEM CROP_SPEC [CROP_SPEC ...]
 
@@ -62,12 +62,11 @@ def main() -> None:
         fig.savefig(out, dpi=80, bbox_inches="tight")
         return
 
-    fig = plt.figure(figsize=(12, 5.2))
-    grid = fig.add_gridspec(2, 1 + (len(specs) + 1) // 2, width_ratios=[2] + [1] * ((len(specs) + 1) // 2),
-                            wspace=0.03, hspace=0.12)
-    ax = fig.add_subplot(grid[:, 0])
-    ax.imshow(overlay(gray(disk_stem), masks[disk_stem], 5))
-    ax.set_title(f"(a) test photograph {disk_stem}: {len(masks[disk_stem])} masks", fontsize=10)
+    fig, axes = plt.subplots(1, 1 + len(specs), figsize=(3 * (1 + len(specs)), 3.25),
+                             gridspec_kw=dict(wspace=0.03))
+    ax = axes[0]
+    ax.imshow(overlay(gray(disk_stem), masks[disk_stem], 6))
+    ax.set_title(f"(a) test photograph, {len(masks[disk_stem])} masks", fontsize=11)
     ax.axis("off")
     for k, spec in enumerate(specs):
         stem, x, y, side, title = spec.split(":", 4)
@@ -75,13 +74,13 @@ def main() -> None:
         y0, x0 = max(0, y - half), max(0, x - half)
         image = gray(stem)[y0:y + half, x0:x + half]
         crop = [binary[y0:y + half, x0:x + half] for binary in masks[stem]]
-        sub = fig.add_subplot(grid[k % 2, 1 + k // 2])
+        sub = axes[1 + k]
         sub.imshow(overlay(image, crop, 1))
-        sub.set_title(f"({chr(98 + k)}) {title}", fontsize=9)
+        sub.set_title(f"({chr(98 + k)}) {title}", fontsize=11)
         sub.axis("off")
         if stem == disk_stem:
             ax.add_patch(plt.Rectangle((x0, y0), image.shape[1], image.shape[0], fill=False, color="white", lw=1.2))
-            ax.text(x0 + 15, y0 + 70, chr(98 + k), color="white", fontsize=10, weight="bold")
+            ax.text(x0 + 15, y0 + 90, chr(98 + k), color="white", fontsize=11, weight="bold")
     fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
 
 

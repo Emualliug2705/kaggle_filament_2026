@@ -23,4 +23,4 @@ Everything needed to fill in the competition's writeup form, one file per field.
 * **Content.** Paste `content.md` into the editor. Its images and links point to this repository on GitHub (`main` branch), so they
   display only while the repository is public.
 * **Numbers.** Every figure in the writeup comes from this repository: out-of-fold PQ from `PIPELINE.ipynb` and the report, the
-  leaderboard scores and rank from the Kaggle API (submission 58424919; private rank 117 of 1,567).
+  leaderboard scores and rank from the Kaggle API (submission 58424919; public rank 36, private rank 10 of 1,708).

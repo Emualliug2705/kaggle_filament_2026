@@ -51,6 +51,10 @@
 \title[A Learned Candidate Scorer for Solar Filament Segmentation]{A Learned Candidate Scorer over Two Mask2Former Families for Solar Filament Instance Segmentation}  % [short title]: running head of odd pages, which the full title overlapped
 \subtitle{\tpl{A Solution to the Solar Filament Segmentation Challenge 2026}} % DO NOT CHANGE
 
+% Last revision from GP (me)
+\newif\ifshowGp
+\showGpfalse       % switch to \showGpfalse to print the text in black
+\NewDocumentCommand{\gp}{+m}{\leavevmode{\ifshowGp\color{blue}\fi#1}}
 
 \author{Guillaume PELLUET}
 \orcid{0000-0002-6537-6768}
@@ -60,7 +64,13 @@
 \email{gpelluet@gmail.com}
 
 \begin{abstract}
-    \tpl{This report describes our solution to the Solar Filament Segmentation Challenge~2026, a Kaggle competition on automatic segmentation of solar filaments in GONG H-$\alpha$ observations.} Detecting and segmenting each filament is hard: filaments are thin, elongated and of very different sizes, and must be told apart from other dark solar features such as sunspots, on 2048-pixel photographs whose brightness falls towards the limb and varies with the observing site and date of capture. The annotations may be the real challenge, as two annotators of the same photograph agree at a panoptic quality (PQ) of only 0.340. As our first model already proposes a candidate for 85--89\% of the annotated filaments, we focus on choosing which candidates to submit rather than on producing more of them. To this end, we fuse the candidates of two Mask2Former families over 16 test-time views, train a gradient-boosted scorer to predict the IoU each candidate will reach with the annotators' filaments, submit the non-overlapping candidates that together maximise the expected agreement between our segmentation and the annotators', and redraw the boundary of each submitted mask from full-resolution U-Net maps. Out of fold on the 707 training observations, the pipeline reaches a PQ of \textbf{0.4801} (95\% bootstrap interval 0.4714--0.4882), against 0.4629 for one Mask2Former family with a fixed score threshold: its masks agree with each annotator more closely than two annotators agree with each other. On the public leaderboard, it scores a PQ of \textbf{0.42}\chg{, and \textbf{0.39} on the private leaderboard. On the H-$\alpha$ test photographs, the submitted masks keep the thin, curved shape of the annotated filaments and leave sunspots and plage out, but are slightly wider and less elongated than the annotations, and few are submitted near the limb. The code is organised as a Python package driven by one documented notebook that rebuilds the submitted file}.
+    % Context
+    \tpl{This report describes our solution to the Solar Filament Segmentation Challenge~2026, a Kaggle competition on automatic segmentation of solar filaments in GONG H-$\alpha$ observations.} Filaments are thin, elongated and of very different sizes, must be told apart from other dark features such as sunspots, and are annotated inconsistently: two annotators of the same photograph agree at a panoptic quality (PQ) of only 0.340. 
+    % Method
+    \gp{Given this low agreement and the difficulty of segmenting thin objects, we split the problem into three stages. (i)~\textit{Candidate generation}: two Mask2Former families propose candidate filaments. (ii)~\textit{Scoring}: a gradient-boosted model, fed by independently trained evidence models, predicts the IoU each candidate will reach with the annotators, and the non-overlapping set that maximises the expected PQ is kept. (iii)~\textit{Refinement}: the boundary of each kept mask is redrawn from full-resolution U-Net maps, to follow the edges and barbs of the filament.}
+    % Perfs.
+    Out of fold on the 707 training observations, the pipeline reaches a PQ of \textbf{0.4801} (95\% interval 0.4714--0.4882), against 0.4629 for one Mask2Former with a fixed threshold; it scores \textbf{0.42} on the public and \chg{\textbf{0.39} on the private leaderboard.}
+
 \end{abstract}
 
 \maketitle
@@ -78,9 +88,8 @@ Guide mode is on.}
 \section{\texorpdfstring{\tpl{Introduction}}{Introduction}}
     \tpl{This report goes over the details of our submitted solution to the Solar Filament Segmentation Challenge~2026 \cite{filament-segmentation-2026}. The challenge, launched on July~10,~2026, is organized by the Earth-Space AI Research (ESAIR) Lab\footnote{\href{https://www.esairlab.com/home}{www.esairlab.com/}}. This challenge utilizes the MAGFiLO dataset for evaluation of the segmentation algorithms \cite{ahmadzadeh2024dataset}.} We address it as instance segmentation of the filaments, scored by panoptic quality (PQ)~\cite{kirillov2019panoptic}.
 
-    Two observations shaped our solution. First, candidate generation is not the bottleneck: the 8-view candidate pool of our first model already held a matching candidate for 85--89\% of the annotated filaments, while a fixed score threshold submitted only about two thirds of them. Second, the annotations are noisy: scored against each other, two annotators of the same image reach a PQ of only 0.340. We therefore spent our effort on understanding how to reach the best agreement with the annotators, and hence which candidates to submit, with a scorer trained on the exact question the metric asks, and checked every step on out-of-fold PQ with paired bootstrap intervals. Our code, the trained models and a notebook to reproduce our experiment are available in our repository\footnote{\href{https://github.com/Emualliug2705/kaggle_filament_2026}{github.com/Emualliug2705/kaggle\_filament\_2026}}.
-
-    \chg{Section~\ref{sec:methodology} describes the pipeline from the raw photograph to the submitted masks, including the architecture of each model. Section~\ref{sec:evaluation} reports the out-of-fold results and describes the shape of the predicted filaments on the H-$\alpha$ photographs. Section~\ref{sec:code} presents the organisation and documentation of the code, and Section~\ref{sec:conclusion} concludes.}
+    Two observations shaped our solution. First, our first model already finds most filaments: among the masks it proposes on 8 rotated and flipped views of a photograph, 85--89\% of the annotated filaments have a matching mask. A fixed score threshold, however, keeps the matching mask for only about two thirds of them. The bottleneck is therefore choosing which masks to submit, not generating them. Second, the annotations are noisy: two annotators of the same image agree at a PQ of only 0.340. 
+    We therefore spent most of our effort on choosing which candidates to submit, with a scorer trained on the exact question the metric asks, and checked every step on out-of-fold PQ with paired bootstrap intervals. Our code, the trained models and a notebook that reproduces the submission are public\footnote{\href{https://github.com/Emualliug2705/kaggle_filament_2026}{github.com/Emualliug2705/kaggle\_filament\_2026}}.
 
 
 % ==================================== %
@@ -96,57 +105,51 @@ Guide mode is on.}
 \Description{Flow chart in four parts. Data: the photograph and the 5 folds. Candidate generation: two Mask2Former families whose 16 views are fused into a candidate pool. Selection: evidence models give 129 numbers per candidate to a LightGBM scorer, followed by an exact selection; on test, the candidates of the 5 fold models are fused before that selection. Refinement: the boundary of each kept mask is redrawn from the U-Net maps, giving the submission.}
 \end{figure*}
 
-Fig.~\ref{fig:pipeline} gives an overview of the pipeline, in four parts. (1)~Data (gray, Section~\ref{sec:data}): the training observations are split into 5 folds grouped by day, on which every model is trained. (2)~Candidate generation (blue, Section~\ref{sec:candidates}): two Mask2Former families read the 2048-pixel photograph, and their 16 views are fused into one pool of candidate filaments. (3)~Selection (orange, Section~\ref{sec:selection}) chooses which candidates to submit: independently trained evidence models describe each candidate, together with its shape and scores, by 129 numbers, from which a LightGBM scorer predicts the IoU it is expected to reach with the annotators' filaments; an exact selection then keeps the non-overlapping set with the largest expected gain in PQ. (4)~Refinement (green, Section~\ref{sec:refinement}) redraws the boundary of each submitted mask from the full-resolution U-Net maps: filaments are thin, so a few pixels change their IoU a lot, and PQ sums the IoU of the matched masks.
+\subsection{\texorpdfstring{\chg{Data, preprocessing}}{Data, preprocessing} and folds}\label{sec:data}
+The training set has 707 GONG \cite{harvey1996gong} observations with one to three annotators each, giving 1,154 annotator records and 8,199 filaments. They were taken on 656 days, and photographs of the same day show the same filaments. We therefore draw 5 folds as a group k-fold over the observation day: no day is shared between folds, and every fold holds photographs from at least 11 of the 12 years and all six sites. Every model family is trained 5 times, model $k$ on the other four folds, so its predictions on fold $k$ are out of fold (OOF); the scorer is cross-fitted on the same folds.
 
-\subsection{\texorpdfstring{\chg{Data, preprocessing}}{Data, preprocessing} and sampling}\label{sec:data}
-The training set has 707 GONG \cite{harvey1996gong} observations: 411 were annotated by one annotator, 145 by two and 151 by three, giving 1,154 annotator records with about 8,200 filaments. A filament stays on the disk for days, and the observations were taken on 656 days, up to three a day, mostly from different GONG sites: photographs of the same day show the same filaments. Split between folds, they would let a model be validated on filaments it was trained on, making optimistic the OOF scores on which the scorer is trained and every choice is made. We therefore draw 5 folds as a group k-fold over the observation day: no day is shared between folds, and every fold holds photographs from at least 11 of the 12 years 2011--2022 and from all six sites. Neighbouring days are not separated (for 34\% of the observations, another fold holds one taken the day before or after), so OOF scores may remain slightly optimistic; contiguous blocks of dates would avoid this, but would tie each fold to one part of the solar cycle. Every model family is trained 5 times, model $k$ on the observations of the other four folds; its predictions on fold $k$ are therefore out of fold (OOF). The second-level scorer is cross-fitted on the same folds.
-
-\chg{\paragraph{Preprocessing} Each observation is a $2048 \times 2048$ 8-bit grayscale JPEG of the full disk. We keep this native resolution everywhere, as a filament can be only a few pixels wide. The annotations, given as COCO polygons, are rasterised into one binary mask per filament and per annotator record. For Mask2Former, the photograph is replicated to three channels (the second family uses its three prepared channels instead, Section~\ref{sec:candidates}), scaled to $[0, 1]$ and standardised with the ImageNet mean and standard deviation expected by the COCO weights. For the U-Nets, the single channel is standardised by the mean and standard deviation of the solar disk of that photograph (its pixels above $0.3$ times the 99th percentile), which removes most of the brightness differences between sites and dates, and clipped to $[-6, 4]$. Their two targets are the fraction of annotators who marked each pixel and the centre line (spine) of each filament, drawn 3 pixels wide from the spine polylines provided with the annotations.}
+\chg{Each observation is a $2048 \times 2048$ 8-bit grayscale JPEG. As a filament can be only a few pixels wide, every model reads it at native resolution, as crops, tiles or whole photographs, except the box refiner, which resamples its context crop to 512 pixels. The annotated polygons are rasterised into one binary mask per filament and per annotator record, and one training sample is one record. For Mask2Former, the photograph is replicated to three channels, scaled to $[0, 1]$ and standardised with the ImageNet statistics of the COCO weights. For the U-Nets, it is standardised by the mean and standard deviation of its own solar disk, which removes most brightness differences between sites and dates, and clipped.}
 
 \subsection{Candidate generation: two Mask2Former families}\label{sec:candidates}
-\chg{\paragraph{Architecture} Mask2Former \cite{cheng2022mask2former} predicts a fixed set of masks, each with a class, instead of labelling pixels. It has three parts. (i)~A Swin-S backbone \cite{liu2021swin}, a hierarchical vision transformer with shifted-window self-attention, extracts features at 1/4, 1/8, 1/16 and 1/32 of the input resolution. (ii)~A pixel decoder, six layers of multi-scale deformable attention, mixes these four scales and outputs a per-pixel embedding at 1/4 resolution. (iii)~A transformer decoder refines 100 learned queries, each meant to describe one object, over nine layers that attend to the 1/32, 1/16 and 1/8 features in turn. In each layer, the cross-attention of a query is restricted to the pixels of the mask that query predicted at the previous layer (masked attention). Each query then gives a class probability (filament or no object) and an embedding whose dot product with the per-pixel embeddings gives its mask logits at 1/4 resolution. In training, the queries are matched one-to-one with the annotated filaments by the Hungarian algorithm, and the loss sums a classification term (weight 2, with the no-object class down-weighted to 0.1) and binary cross-entropy and Dice terms on the masks (weight 5 each), computed on 12,544 sampled points per mask and applied after every decoder layer. We keep these settings of the reference implementation and only replace the COCO classifier with one filament class.}
-
-\chg{\paragraph{Training and the two families}} Both families start from COCO \cite{lin2014coco} instance-segmentation weights. They train for 50 epochs at native resolution, with bf16 and the loss of the reference implementation. A training step holds 8 crops of 1024 pixels or, in a quarter of the steps, 2 whole 2048-pixel photographs (the same number of pixels); only one crop or photograph at a time fits in the 12\,GB of our GPUs, a whole photograph only with activation checkpointing, so gradients are accumulated one sample at a time. One sample is one annotator record. On a 12\,GB GPU one fold trains in about 5.5 hours. The first family reads the grayscale photograph. The second reads three channels: the photograph, the solar disk divided by its radial median profile (a limb-darkening correction that is robust to the filaments themselves; the disk is found by a Hough circle on the limb), and a CLAHE \cite{zuiderveld1994clahe} copy of that flattened disk; its training crops are also zoomed by a random factor in $[0.8, 1.25]$. Alone, the second family is not better (OOF single-view PQ 0.4606 against 0.4630, mean over the 5 held-out folds, each with its output rule (score threshold, erosion, minimum area) tuned on that fold, unlike the fixed rule of Tab.~\ref{tab:results}); fused with the first, it adds about 25\% candidates to each pool, but little to the final score (Section~\ref{sec:evaluation}).
-
-\chg{\paragraph{Inference and view fusion}} Mask2Former predicts each mask at a quarter of the input resolution (512 pixels for a 2048-pixel photograph); the mask is enlarged to 2048 pixels by bilinear interpolation, and its pixels with a probability above 0.5 are kept. Every predicted mask whose class probability is at least 0.02 and whose area is at least 40 pixels becomes a candidate; its score is its class probability times its mean mask probability. Each fold model predicts the 8 rotations and reflections of the image. The 16 views of a fold's two models are fused by consensus: in decreasing score, each candidate not yet grouped starts a group and takes every ungrouped candidate whose IoU with it is at least 0.5; a pixel belongs to the group's mask if about half of its $m$ members cover it ($\max(1, \mathrm{round}(m/2))$ of them), groups under 40 pixels are dropped, and the group's score is the mean member score times $(0.5 + 0.5\,m/16)$, which favours candidates found in many views.
-
-\subsection{Selection}\label{sec:selection}
-
-\subsubsection{Evidence models}\label{sec:evidence}
-Three kinds of models, trained on the same folds, check each candidate independently. A Mask R-CNN \cite{he2017maskrcnn} (ResNet-50 FPN v2, COCO start, 1024-pixel crops, 12k iterations) proposes its own instances\chg{: a two-stage detector, whose region proposal network proposes boxes on a feature pyramid, and whose heads give each box a refined position, a score and a $28 \times 28$ mask}. Three U-Nets \cite{ronneberger2015unet}, with ConvNeXt-T \cite{liu2022convnext} encoders trained for 24k and 48k steps and a ResNet-34 \cite{he2016resnet} encoder trained for 30k steps, predict two full-resolution maps\chg{ (a U-Net is an encoder--decoder: the pretrained encoder reduces the resolution in five stages, the decoder brings it back to full resolution while concatenating, at each stage, the encoder features of the same resolution, and a final convolution outputs the two maps)}: the filament probability (target: the fraction of annotators who marked the pixel) and the filament spine (its centre line); the loss is BCE plus 0.5 Dice on the first map plus 0.3 BCE on the second. The scorer reads both maps of all three, and the refinement (Section~\ref{sec:refinement}) averages the probability maps of two of them. A tiled detector (Faster R-CNN v2 \cite{ren2015faster} on 9 overlapping 1024-pixel tiles of the photograph) proposes boxes, and a ResNet-18 U-Net draws the mask of each from a context crop around the box, with the box as a hint, giving a third, region-based set of instances.
-
-\subsubsection{A scorer trained on the metric's question}\label{sec:scorer}
-For each candidate of a training observation, the target is the mean over the observation's annotator records of the IoU between the candidate and the annotated filament it overlaps most, counted as zero when this IoU is not above 0.5; this is exactly what the candidate adds to the PQ numerator, per record, before the overlaps between kept masks are resolved (Section~\ref{sec:exact}). The scorer sees 129 numbers per candidate. Thirty describe the candidate itself: its fused score, its agreement with the single-view predictions, its area, box and elongation, its distance from the disk centre, the intensity and contrast of the photograph inside and around it, and its competitors (the overlapping candidates and their scores). The other 99 describe what the evidence models say about it: its agreement with the Mask R-CNN instances (5 numbers: the best IoU, that instance's score, the best score among instances with IoU above 0.5, the number with IoU above 0.3, and the best product of IoU and score), the same for the tiled detector (5), and for each U-Net the spine map inside and around the mask and how the mask covers the map's own connected regions (12 each), the same on its probability map, and how stable the candidate is across the 16 raw views (17 numbers, such as how much its outline moves from view to view). The scorer is LightGBM \cite{ke2017lightgbm}\chg{, gradient-boosted decision trees: regression trees are grown one after another, each fitted to the errors left by the previous ones} (regression, 300 rounds, 15 leaves, learning rate 0.05), averaged over 10 seeds and weighted by the number of records. Its OOF predictions correlate with the target at 0.780; the candidates' own fused score correlates at 0.702.
-
-\subsubsection{Exact selection and test fusion}\label{sec:exact}
-PQ \cite{kirillov2019panoptic} is
-\begin{equation}
-  \mathrm{PQ} = \frac{\sum_{(p,g) \in \mathrm{TP}} \mathrm{IoU}(p,g)}{|\mathrm{TP}| + \tfrac12 |\mathrm{FP}| + \tfrac12 |\mathrm{FN}|},
-  \label{eq:pq}
-\end{equation}
-so adding a non-overlapping mask raises the score only if its expected matched IoU exceeds PQ/2. Among the $n$ candidates of a photograph, with masks $M_i$ and scorer predictions $q_i$, we therefore keep the set $\{i : x_i = 1\}$ solving
+\chg{\paragraph{\textbf{Architecture}} Mask2Former \cite{cheng2022mask2former} predicts a set of masks, each with a class. (i)~A Swin-S backbone \cite{liu2021swin}, a hierarchical transformer with shifted-window attention, extracts features at 1/4 to 1/32 of the input resolution. (ii)~A pixel decoder of six multi-scale deformable-attention layers fuses them into a per-pixel embedding at 1/4 resolution. (iii)~A transformer decoder refines 100 learned queries over nine layers, each attending to one scale in turn, with masked attention: a query only attends to the pixels of the mask it predicted at the previous layer. Each query gives a class probability (filament or no object) and an embedding whose dot product with the per-pixel embeddings gives its mask logits. In training, queries are matched one-to-one to the annotated filaments by the Hungarian algorithm~\cite{kuhn1955hungarian}, and the loss, summed over the predictions of every decoder layer $\ell$, is
 \begin{equation}
   \begin{aligned}
-    \max_{x \in \{0,1\}^n}\ & \sum_{i=1}^{n} x_i\,(q_i - \tau) \\
+    \mathcal{L} &= \textstyle\sum_{\ell} \big( 2\,\mathcal{L}^{\ell}_{\mathrm{cls}} + 5\,\mathcal{L}^{\ell}_{\mathrm{BCE}} + 5\,\mathcal{L}^{\ell}_{\mathrm{Dice}} \big), \\
+    \mathcal{L}_{\mathrm{cls}} &= -\frac{\sum_{i} w_i \log p_i(c_i)}{\sum_{i} w_i}, \quad w_i = \begin{cases} 1 & \text{matched} \\[-2pt] 0.1 & \text{else} \end{cases}
+  \end{aligned}
+  \label{eq:m2f}
+\end{equation}
+where $p_i(c_i)$ is the probability query $i$ gives its target class (filament if matched, no object otherwise), and the BCE and Dice terms compare each matched mask with its filament. These are the reference settings; only the COCO classifier is replaced, by one filament class.}
+
+\paragraph{\textbf{Training}} Both families start from the COCO \cite{lin2014coco} instance segmentation weights and are trained with AdamW and a cosine decay, with a lower learning rate for the backbone. A step holds either native-resolution crops or whole photographs, accumulated one sample at a time to fit in GPU memory. Crops are centred on a random filament; samples are flipped, rotated by multiples of $90^\circ$ and changed in gamma and gain. The first family reads the grayscale photograph. The second reads three channels: the photograph, the disk divided by its radial median profile (a limb-darkening correction; the disk is found by a Hough circle) and a CLAHE copy of it, with randomly zoomed crops.
+
+\paragraph{\textbf{Inference and view fusion}} Mask logits come out at 1/4 resolution (512 pixels) and are upsampled bilinearly to 2048 pixels and thresholded at 0.5. Every mask whose class probability and area exceed small floors becomes a candidate, scored by its class probability times its mean mask probability. Each fold model predicts the 8 rotations and reflections, and the 16 views of a fold's two models are fused: in decreasing score, each ungrouped candidate starts a group and takes every ungrouped candidate whose IoU with it exceeds a link threshold; a pixel belongs to the group's mask if half of its $m$ members cover it, and the group's score is the mean member score times $(0.5 + 0.5\,m/16)$.
+
+\subsection{Scoring and selection}\label{sec:selection}
+\paragraph{\textbf{Evidence models}} Three kinds of evidence models (six networks, each trained on the same folds) check each candidate independently.
+(i)~A Mask R-CNN \cite{he2017maskrcnn} (ResNet-50 FPN v2) proposes its own instances\chg{: region proposals on a feature pyramid, each refined into a box, a score and a mask}. 
+(ii)~Three U-Nets \cite{ronneberger2015unet}\chg{, encoder--decoders,} with ConvNeXt-T \cite{liu2022convnext} (two) and ResNet-34 \cite{he2016resnet} encoders, predict two full-resolution maps: the filament probability (target: the fraction of annotators who marked the pixel) and the filament spine (its centre line), with BCE and Dice losses. 
+(iii)~A tiled Faster R-CNN \cite{ren2015faster} proposes boxes on 9 overlapping tiles, and a ResNet-18 U-Net draws the mask inside each box.
+
+\paragraph{\textbf{A scorer trained on the metric's question}} For each candidate of a training observation, the target is the mean over its annotator records of the IoU with the annotated filament it overlaps most, counted as zero when not above 0.5: exactly what the candidate adds to the PQ numerator. The scorer reads 129 numbers per candidate: 30 on the candidate itself (fused score, area, elongation, position on the disk, contrast, overlapping competitors), 10 on its agreement with the Mask R-CNN and tiled-detector instances, 72 on the spine and probability maps of the three U-Nets inside and around it, and 17 on how stable it is across the 16 raw views. LightGBM \cite{ke2017lightgbm}\chg{, gradient-boosted regression trees, each fitted to the errors of the previous ones}, is averaged over several random seeds. Its OOF predictions correlate with the target at 0.780, against 0.702 for the fused score.
+
+\paragraph{\textbf{Exact selection}} PQ \cite{kirillov2019panoptic} is
+\begin{equation}
+  \mathrm{PQ} = \frac{\sum_{(\hat{y}, y) \in \mathrm{TP}} \mathrm{IoU}(\hat{y}, y)}{|\mathrm{TP}| + \tfrac12 |\mathrm{FP}| + \tfrac12 |\mathrm{FN}|},
+  \label{eq:pq}
+\end{equation}
+so a mask raises the score only if its expected matched IoU exceeds PQ/2. Among the $n$ candidates of a photograph, with masks $M_i$ and predictions $q_i$, we keep the set $\{i : x_i = 1\}$ solving
+\begin{equation}
+  \begin{aligned}
+    \max_{x \in \{0,1\}^n}\ & \textstyle\sum_{i} x_i\,(q_i - \tau) \\
     \text{s.t.}\ & x_i + x_j \le 1 \ \text{ if } \frac{|M_i \cap M_j|}{\min(|M_i|, |M_j|)} > \theta,
   \end{aligned}
   \label{eq:select}
 \end{equation}
-so that no two kept masks overlap by more than a fraction $\theta$ of the smaller one. Candidates with $q_i \le \tau$ are dropped, the conflict graph of the others splits into connected components, and each component is solved exactly as a 0/1 integer program with HiGHS \cite{huangfu2018highs}. We solve~\eqref{eq:select} exactly instead of applying the greedy rule of non-maximum suppression (keep the candidate with the highest $q$, drop every candidate that conflicts with it, repeat), because this rule can miss the best set when candidates overlap in chains. A long filament, for example, may be proposed both as one whole mask $A$ and as its two halves $B$ and $C$, which do not overlap each other but each conflict with $A$. With $q - \tau$ equal to 0.5 for $A$ and 0.4 for each half, the greedy rule keeps $A$ alone (total 0.5), whereas the exact solution keeps $B$ and $C$ (total 0.8). The kept masks are painted in decreasing $q$, so that each pixel goes to one mask, and masks under 100 pixels are dropped. With $\theta = 0.1$, a grid over $\tau$ on the OOF observations gives $\tau = 0.25$, close to PQ/2, as expected.
-
-On test, the scorer is retrained on all OOF rows. The candidates of the 5 fold models are fused as the views are (Section~\ref{sec:candidates}), a group's $q$ is the mean over the 5 models of that model's best member (zero for a model without one), and the same $\theta$ and $\tau = 0.25$ select the instances.
+that is, the set with the largest total expected gain in which no two masks overlap by more than a fraction $\theta$ of the smaller one. It is solved exactly, per connected component of the conflict graph, as a 0/1 integer program with HiGHS \cite{huangfu2018highs}. Unlike greedy non-maximum suppression, this can prefer two halves of a filament to one whole mask conflicting with both. The kept masks are painted in decreasing $q$, so that each pixel goes to one mask. $\theta$ and $\tau$ are chosen on OOF PQ (Section~\ref{sec:details}), and $\tau$ comes out close to PQ/2, as expected. On test, the scorer is retrained on all OOF rows, the candidates of the 5 fold models are fused as the views are, and a group's $q$ is the mean over the 5 models of that model's best member.
 
 \subsection{Refinement: boundary redraw}\label{sec:refinement}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.32\columnwidth]{figures/redraw_closeup.png}
-\caption{Boundary redraw on one test filament: the Mask2Former mask (white) and the mask after the 2-pixel redraw from the U-Net maps (blue).}
-\label{fig:redraw}
-\Description{Close-up of one filament with two outlines, white before and blue after the redraw.}
-\end{figure}
-
-Mask2Former's masks come from quarter-resolution logits, while the U-Nets predict at full resolution. Each kept mask $M$ therefore keeps its extent, and its boundary is redrawn within $r = 2$ pixels from $P$, the mean of the probability maps of the 48k-step ConvNeXt-T and the ResNet-34 U-Nets, shifted by 0.25 pixel towards the top of the photograph, where the annotators' outlines sit on average. With $C = \mathrm{erode}(M, r)$ and $O = \mathrm{dilate}(M, r)$, the new mask $M'$ is $C$ plus the pixels of $O \setminus C$ with the highest $P$, up to an area set to the geometric mean of $|M|$ and of the U-Net area $|C \cup ((P > 0.5) \cap O)|$. The redrawn masks are painted again in decreasing $q$, and masks under 100 pixels are dropped.\chg{ The submission lists each remaining mask as one row of the CSV file, as a COCO run-length encoding at $2048 \times 2048$; the masks of a photograph never overlap.}
+Mask2Former's masks come from quarter-resolution logits, while the U-Nets predict at full resolution. So Mask2Former decides where the filament is and roughly how big it is. Each kept mask $M$ keeps its extent, and its boundary is redrawn within $r$ pixels from $P$, the mean probability map of two U-Nets, shifted by a fraction of a pixel upwards, where the annotators' outlines sit on average from our analysis. With $C = \mathrm{erode}(M, r)$ and $O = \mathrm{dilate}(M, r)$, the new mask is $C$ plus the pixels of $O \setminus C$ with the highest $P$, up to the geometric mean of $|M|$ and of the U-Net area $|C \cup ((P > 0.5) \cap O)|$. The redrawn masks are painted again in decreasing $q$, masks below a minimum area are dropped, and each remaining mask is written to the submission as a COCO run-length encoding.
 
 
 % ==================================== %
@@ -154,21 +157,11 @@ Mask2Former's masks come from quarter-resolution logits, while the U-Nets predic
 % ==================================== %
 \section{\texorpdfstring{\tpl{Evaluation}}{Evaluation}}\label{sec:evaluation}
 
-\subsection{Experiment details}
-All numbers are OOF PQ over the 707 training observations: each annotator record is matched separately, true positives, false positives and false negatives are pooled over all records, and PQ is computed once, as in the competition's scorer. Every choice (model families, epochs, scorer settings, $\tau$, $\theta$) was made on this OOF PQ. We first explored semantic segmentation models, from a basic CNN to U-Net \cite{ronneberger2015unet} and UNet~3+ \cite{huang2020unet3plus}, before choosing Mask2Former: it predicts each filament directly as its own scored mask, as PQ requires, whereas a semantic map must be split into instances by connected components, which can merge touching filaments and split faint ones; it also gave the best scores. U-Nets remain in the pipeline, as evidence and for the boundaries (Sections~\ref{sec:selection} and~\ref{sec:refinement}). A difference between two variants is judged with a paired bootstrap over observations (4,000 resamples, the same observations in both arms); the uncertainty of a single score with an unpaired bootstrap (5,000 resamples). To check that the threshold choice is not overfitted, $\tau$ is also chosen on 4 folds and applied to the fifth (nested).
-
-All models are trained with PyTorch on GPUs with 12\,GB of memory. Mask2Former uses AdamW (learning rate $10^{-4}$, ten times lower for the backbone, weight decay 0.05), a 500-step warm-up followed by a cosine decay, and gradient clipping at a norm of 0.01; each crop is centred on a randomly chosen annotated filament and shifted at random by up to 35\% of the crop size, and every sample is randomly flipped, rotated by a multiple of $90^\circ$ and changed in gamma (by a factor of 0.8 to 1.25) and gain (0.85 to 1.15); we use the weights of the last epoch. The U-Nets train on 512-pixel crops (batch 8, AdamW, learning rate $2\cdot10^{-4}$ for the ImageNet encoder and $10^{-3}$ for the decoder, warm-up then cosine decay), with rotations by any angle, scaling by 0.9--1.1, blur, JPEG compression and intensity changes; we keep an exponential moving average of their weights (decay 0.999) and average their predictions over the 8 rotations and reflections. The Mask R-CNN trains with SGD (learning rate 0.01, batch 4), each sample showing the filaments of one randomly drawn annotator. The tiled detector trains for 15k steps (batch 4, AdamW, frozen batch-norm statistics) and its refiner for 30k steps (batch 8, BCE plus Dice loss).
-
-\subsection{Results}
-Tab.~\ref{tab:results} adds one step at a time on the same observations. The learned scorer is the largest single gain, and it needs the evidence models: on candidate numbers alone, it shows no visible difference or improvement over a fixed threshold on the same pool. Tab.~\ref{tab:evidence} adds the evidence blocks one at a time: the U-Net spine maps bring most of the gain, while the tiled detector adds nothing measurable. The second Mask2Former family adds little as well: on the grayscale family alone, the same pipeline differs by $-0.0004$ (95\% interval $-0.0028$ to $+0.0020$). The final pipeline scores \textbf{0.4801} (bootstrap standard deviation 0.0043, 95\% interval 0.4714--0.4882), well above the PQ of 0.340 at which two annotators of the same photograph agree. Its five folds score 0.4733, 0.4909, 0.4775, 0.4825 and 0.4755 (standard deviation 0.0070), so differences below about 0.005 between single rows are within noise; the paired intervals of Tab.~\ref{tab:results} are narrower because both arms share the same observations. On the public leaderboard, the submitted file scores a PQ of \textbf{0.42}, like the previous one\chg{, and \textbf{0.39} on the private leaderboard}. Out of fold, the final pipeline outputs 7,378 masks against the 8,199 annotated ones (counted per record): 5,409 are matched, with a mean IoU of 0.691; the last two scorer blocks mostly remove false positives (265 fewer, for 117 fewer matches). Fig.~\ref{fig:examples} shows OOF predictions and Fig.~\ref{fig:redraw} the boundary redraw.
-
 \begin{table}[t]
 \centering
 \small
-\caption{OOF PQ on the 707 training observations, adding one step at a time. $\Delta$: paired difference with the row above (last row: with the two-family pipeline, measured with an earlier version of the redraw), with its 95\% bootstrap interval. $\dagger$:~second run on other GPUs, where the row above scores 0.4744.}
+\caption{OOF PQ on the 707 training observations, adding one step at a time. $\Delta$: paired difference with the row above, with its 95\% bootstrap interval. $\dagger$:~against a rerun of the row above with $\tau$ chosen on all folds (0.4744).}
 \label{tab:results}
-% Delta cells on two lines: the difference, then its 95% interval below it.
-% Every cell is centred vertically in its row, so a one-line cell sits in the middle of a two-line row.
 \newcommand*{\twoline}[2]{\begin{tabular}{@{}c@{}}#1\\ #2\end{tabular}}
 \renewcommand{\tabularxcolumn}[1]{m{#1}}
 \setlength{\tabcolsep}{4pt}
@@ -179,7 +172,6 @@ Step & OOF PQ & \twoline{$\Delta$}{{[}95\% interval{]}} \\
 Grayscale family, single view, score~$>0.85$ & 0.4629 & -- \\
 Two families, 16-view pool, score $>0.75$ & 0.4693 & -- \\
 + learned scorer, exact selection (nested~$\tau$) & 0.4739 & \textbf{\boldmath\twoline{$+0.0046$}{{[}$+0.0014$, $+0.0076${]}}} \\
-\quad $\tau$ chosen on all folds & 0.4750 & -- \\
 + boundary redraw, $r=2$~$\dagger$ & 0.4783 & \twoline{$+0.0039$}{{[}$+0.0025$, $+0.0054${]}} \\
 + view stability, U-Net probability, 10 seeds & \textbf{0.4801} & \twoline{$+0.0018$}{{[}$-0.0004$, $+0.0039${]}} \\
 \midrule
@@ -188,38 +180,25 @@ Same pipeline, grayscale family only & -- & \twoline{$-0.0004$}{{[}$-0.0028$, $+
 \end{tabularx}
 \end{table}
 
-\begin{table}[t]
-\centering
-\small
-\caption{Evidence blocks of the scorer (OOF PQ as emitted, $\tau$ chosen on 4 folds and applied to the fifth). Correlation: OOF prediction against the target. $\ast$:~10 seeds (with 10 seeds, the 76-number scorer scores 0.4732). Before the redraw; final PQ 0.4801 in Tab.~\ref{tab:results}.}
-\label{tab:evidence}
-\begin{tabular}{lccc}
-\toprule
-Scorer inputs & Numbers & Correlation & OOF PQ \\
-\midrule
-Candidate only & 30 & 0.772 & 0.4693 \\
-+ Mask R-CNN & 35 & 0.776 & 0.4712 \\
-+ 3 U-Net spine maps & 71 & 0.777 & 0.4745 \\
-+ tiled detector & 76 & 0.778 & 0.4739 \\
-+ view stability, U-Net prob.~$\ast$ & 129 & \textbf{0.780} & \textbf{0.4745} \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Protocol and results}
+\paragraph{\textbf{Protocol}} All numbers are OOF PQ over the 707 training observations, computed as in the competition: each annotator record is matched separately and the counts are pooled before PQ is computed once. All parameters were tuned on this OOF PQ; a difference is judged with a paired bootstrap over observations (4,000 resamples), and $\tau$ is also chosen on 4 folds and applied to the fifth (nested) to check that it is not overfitted. Semantic models (a basic CNN, U-Net, UNet~3+ \cite{huang2020unet3plus}) scored lower than Mask2Former, which predicts each filament as its own mask, as PQ requires, instead of splitting a map into connected components.
+
+\paragraph{\textbf{Results}} Tab.~\ref{tab:results} adds one step at a time to decompose our approach. \gp{Fusing the 16 views and learning the scorer bring the largest gains. The scorer needs the evidence models: on the candidate's own numbers it does no better than a fixed threshold, the U-Net spine maps bring most of its gain. With a pool that already holds a candidate for 85--89\% of the filaments, this shows that the difficulty of this challenge lies more in choosing which candidates to submit than in segmenting them.}
+The final pipeline scores \textbf{0.4801} (95\% interval 0.4714--0.4882), well above the 0.340 at which two annotators agree; its folds range from 0.4733 to 0.4909, so differences below about 0.005 between single rows are noise. Of its 7,378 masks, 5,409 match one of the 8,199 annotated filaments, with a mean IoU of 0.691. 
+Regarding the test and so the leaderboard of the competition, the final submission scores \textbf{0.42} on the public leaderboard \chg{and \textbf{0.39} on the private one}, \gp{ranking 36th and 10th of 1,708 teams, respectively}.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{figures/oof_predictions.png}
-\caption{Out-of-fold predictions of the final pipeline (filled blue) and one annotator's filaments (orange outlines) on three training observations, each predicted by models and a scorer that never saw it: the best, the median and the worst observation by match rate (observations with at least 4 annotated filaments).}
+\includegraphics[width=0.64\textwidth]{figures/oof_predictions.png}
+\caption{Out-of-fold predictions (filled blue) and one annotator's filaments (orange outlines) on three training observations, predicted by models and a scorer that never saw them: the best, the median and the worst observation by match rate.}
 \label{fig:examples}
 \Description{Three crops of solar disk images with predicted filaments filled in blue and one annotator's filaments outlined in orange.}
 \end{figure*}
 
-\chg{\subsection{Morphology of the predicted segmentations}\label{sec:morphology}
-
-\begin{figure*}[t]
+\chg{\begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/morphology.png}
-\caption{Submitted masks on H-$\alpha$ test photographs, one colour per mask: (a)~a full disk, where the sunspots and plage on the left are not segmented; (b)~the long quiescent filament of (a), kept as one thin mask that follows its curve and the irregularities of its edge; (c)~a broad filament whose two pieces, separated by a gap, are submitted as one mask (both in green), as annotators often draw it; (d)~a sunspot and the surrounding plage, left out, next to a filament; (e)~small filaments around an active region.}
+\caption{Submitted masks on H-$\alpha$ test photographs, one colour per mask: (a)~a full disk, whose sunspots and plage are not segmented; (b)~its long quiescent filament, kept as one thin mask that follows its curve; (c)~a broad filament in two pieces, submitted as one mask, as annotators often draw it; (d)~a sunspot left out, next to a filament; (e)~small filaments around an active region.}
 \label{fig:morphology}
 \Description{A full solar disk with five coloured filament masks, and four close-ups: a long curved filament, a broad filament in two pieces with one colour, a sunspot without mask next to a filament, and small filaments near a bright active region.}
 \end{figure*}
@@ -227,80 +206,40 @@ Candidate only & 30 & 0.772 & 0.4693 \\
 \begin{table}[t]
 \centering
 \small
-\caption{Shape of the 1,161 masks submitted on the 180 test photographs and of the 8,199 annotated training filaments: median [interquartile range]. Width: 4 times the mean distance from a mask pixel to the background, the width of a uniform strip; length: area / width; solidity: area / area of the convex hull; $R$: radius of the solar disk.}
+\caption{Shape of the 1,161 masks submitted on the 180 test photographs and of the 8,199 annotated training filaments: median [interquartile range]. Width: 4 times the mean distance to the background (the width of a uniform strip); elongation: area / width$^2$; solidity: area / convex-hull area; $R$: disk radius.}
 \label{tab:morphology}
-\setlength{\tabcolsep}{4pt}
+\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{lcc}
 \toprule
  & Submitted (test) & Annotated (train) \\
 \midrule
-Masks per photograph / record & 6 [mean 6.5] & 7 [mean 7.1] \\
 Area (pixels) & 1270 [720, 2358] & 1228 [670, 2438] \\
 Width (pixels) & 12.9 [10.7, 16.2] & 11.5 [9.3, 15.0] \\
-Length (pixels) & 98 [64, 154] & 105 [65, 176] \\
-Elongation (length / width) & 7.7 [5.2, 10.9] & 9.0 [5.8, 13.9] \\
+Elongation & 7.7 [5.2, 10.9] & 9.0 [5.8, 13.9] \\
 Solidity & 0.64 [0.49, 0.78] & 0.57 [0.44, 0.73] \\
 In one connected piece & 90.4\% & 99.6\% \\
-Centre beyond $0.9\,R$ & 0.2\% (2) & 0.9\% (75) \\
+Centre beyond $0.9\,R$ & 0.2\% & 0.9\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-PQ counts a match only above an IoU of 0.5, so it says little about the shape of the masks. We therefore look at the submitted masks on the H-$\alpha$ test photographs (Fig.~\ref{fig:morphology}), at OOF predictions against an annotator (Fig.~\ref{fig:examples}), and compare their shape statistics with those of the annotated training filaments (Tab.~\ref{tab:morphology}); the two sets come from different photographs of the same period, sites and instrument, so only large differences are meaningful.
+\subsection{Morphology of the predicted segmentations}\label{sec:morphology}
+PQ only counts matches above an IoU of 0.5, so we also look at the shape of the masks on the H-$\alpha$ photographs (Fig.~\ref{fig:examples} and~\ref{fig:morphology}) and compare their statistics with the annotations (Tab.~\ref{tab:morphology}, on different photographs, so only large differences matter). The masks are thin, elongated and often curved, like the filaments: median width 13 pixels, and three quarters are more than 5 times longer than wide. A long quiescent filament is kept as one mask along its whole curve (Fig.~\ref{fig:morphology}b), broad irregular filaments as broad masks (c), and small filaments are found next to active regions (e), while sunspots and the dark structures inside plage, as dark as filaments, are left out (a, d).
 
-\paragraph{What the masks look like} The predicted masks are thin, elongated and often curved, like the filaments: their median width is 13 pixels and three quarters of them are more than 5 times longer than wide. A long quiescent filament is kept as one mask that follows its whole curve, with the small irregularities of its edge (Fig.~\ref{fig:morphology}b, Fig.~\ref{fig:redraw}). Broad filaments of irregular outline are kept as broad masks (Fig.~\ref{fig:morphology}c), and small filaments are found close to active regions (Fig.~\ref{fig:morphology}e). The other dark features of the disk, sunspots and the small dark structures inside active regions, are left out in these examples (Fig.~\ref{fig:morphology}a,~d,~e), although they are as dark as the filaments. On the best OOF observation of Fig.~\ref{fig:examples}, every annotated filament is matched and the masks follow the annotated outlines closely.
-
-\paragraph{How they differ from the annotations} Three differences stand out in Tab.~\ref{tab:morphology}. (i)~The masks are slightly wider (median 12.9 against 11.5 pixels), shorter and therefore less elongated (7.7 against 9.0), with a higher solidity (0.64 against 0.57): their outlines are smoother, and they tend to stop before the faint, thin ends that annotators include. This is where the boundary redraw helps (Fig.~\ref{fig:redraw}) and where the remaining error of the matched masks lies (mean IoU 0.691). On the median observation of Fig.~\ref{fig:examples}, most of the 7 missed filaments are small ones. (ii)~One mask in ten is made of several separate pieces, against almost none of the annotations. Some join the pieces of one filament across a gap, as annotators do (Fig.~\ref{fig:morphology}c); others can be cut when the masks are painted in decreasing $q$ and a mask loses the pixels already given to a mask of higher $q$. (iii)~Near the limb, where foreshortening makes filaments thinner and limb darkening makes them fainter, the pipeline submits almost nothing: 2 masks have their centre beyond $0.9\,R$, against 0.9\% of the annotated filaments. Faint filaments are missed in general: on the worst OOF observation of Fig.~\ref{fig:examples}, the only annotated filament, large but of low contrast, gets no mask.}
-
-\subsection{Future work}
-The main strength of the approach is the way it decides what to submit. Instead of keeping every candidate above a fixed score, a model learns how well each candidate is likely to match the annotators' filaments, helped by other models trained separately, and the best combination of non-overlapping candidates is then kept.
-
-On the other hand, our main weakness is the ceiling set by the annotations. Annotators agree with each other at a PQ of only 0.340. On observations with several annotators, 71\% of the OOF misses of our first model were filaments that no other annotator of the photograph drew, and 54\% of its false positives matched another annotator's filament. Many of the errors are therefore disagreements between annotators rather than missing candidates: the challenge lies less in generating candidates than in choosing which ones to submit, which is why we focused our work on the scorer rather than on candidate generation. Even so, a scorer can only learn what the annotators have in common, which bounds what better selection can achieve. The pipeline is also heavy: 40 models and about 115 GPU-hours of training (about 28 hours on four 12\,GB GPUs), for gains of a few thousandths per step beyond the scorer. It was meticulous work, gaining a little more precision at each step. In return, the final pipeline gives a more robust segmentation: every submitted mask has been checked by several independently trained models, and the result therefore does not depend on any single one of them.
-
-Several ideas did not help out of fold and were not kept: filling gaps between candidates, merging split filaments, size-dependent thresholds, removing candidates near the limb, a larger scorer, contrast features, an HRNet evidence model, training with a centre-line (clDice) loss, a vote of scorers trained without each fold, and a convolutional scorer on candidate crops stacked into LightGBM; nor, lately, the detectors' instances added to the pool, or thresholds per year, site or hour. The most promising direction is therefore not more candidates but a better model, one that generates precise candidates while already accounting for the disagreement between annotators and scoring its candidates accordingly. Our next step will be to train on more observations while keeping as targets only the filaments that the annotators agree on, chosen by a vote among them. Gains could also come from merging instances. On some observations, the annotator drew as one filament a dark upper part and a fainter lower part that meet in the middle, while our model segments only the upper part: its IoU with the annotation stays below 0.5, so it counts as both a miss and a false positive. A fixed rule that merges split filaments did not help (see above); the model should rather learn when annotators join two parts into one filament, and reproduce this behaviour, as learned agglomeration methods learn when two fragments of a neuron in electron-microscopy images belong to the same object~\cite{nuneziglesias2013gala}.
+Three differences with the annotations stand out. (i)~The masks are slightly wider (12.9 against 11.5 pixels), less elongated (7.7 against 9.0) and more convex (solidity 0.64 against 0.57): their outlines are smoother and stop before the faint, thin ends that annotators include in their annotations. (ii)~One mask in ten has several separate pieces, against almost no annotation: some join the pieces of one filament across a gap, as annotators do (c), others are cut when masks are painted and lose pixels to a mask of higher $q$. (iii)~Faint filaments are missed, in particular near the limb, where foreshortening and limb darkening make them thinner and fainter: 0.2\% of the masks lie beyond $0.9\,R$, against 0.9\% of the annotations.
 
 
-\chg{% ==================================== %
-%        IMPLEMENTATION AND CODE       %
-% ==================================== %
-\section{Implementation and code}\label{sec:code}
-
-\begin{table}[t]
-\centering
-\small
-\caption{Layout of the code (Python 3.12, PyTorch 2.8): one package, \texttt{src/}, with one subpackage per stage of Fig.~\ref{fig:pipeline}.}
-\label{tab:code}
-\begin{tabularx}{\columnwidth}{@{}>{\ttfamily}lX@{}}
-\toprule
-\normalfont Folder & Role \\
-\midrule
-paths.py & every folder the pipeline reads or writes, each overridable by an environment variable \\
-data/ & the fixed 5 folds, photograph loading and disk statistics \\
-models/ & Mask2Former (model, data, training loop, evaluation), Mask R-CNN, U-Net, tiled detector and refiner \\
-training/ & one launcher per model family, preprocessing caches \\
-inference/ & test-time views, view fusion, two-family candidate pools, evidence banks \\
-scorer/ & scorer features, LightGBM, exact selection, test fusion, boundary redraw \\
-evaluation/ & the organisers' matching rule, PQ, threshold sweeps, comparison of two submissions \\
-utils/ & RLE encoding, PQ, painting, submission writing and checks \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\paragraph{Modularity} The code is one Python package of 45 modules (about 6,400 lines), with one subpackage per stage of the pipeline (Tab.~\ref{tab:code}). Each stage is a module with its own command line that reads the files of the previous stage and writes its own, so a stage can be rerun or replaced alone; the scorer, for instance, runs as \texttt{python -m src.scorer.selector} followed by its steps (\texttt{features}, \texttt{evidence}, \ldots, \texttt{fit}, \texttt{test}, \texttt{ensemble}). The models build on maintained libraries rather than reimplementations: Hugging Face Transformers for Mask2Former, torchvision for the detectors, segmentation\_models\_pytorch for the U-Nets, LightGBM for the scorer and SciPy's interface to HiGHS for the selection. Settings that were compared out of fold are switches, not code edits: the input of a Mask2Former family (\texttt{FILAMENT\_PREP}), the evidence blocks and the seeds of the scorer (\texttt{FILAMENT\_SCORER\_BLOCKS}, \texttt{FILAMENT\_SCORER\_SEEDS}), which is how the ablations of Tab.~\ref{tab:evidence} were run. All folders are defined in one module, \texttt{paths.py}, and all models read the same fold file, \texttt{data/folds.json}.
-
-\paragraph{Documentation} 43 of the 45 modules open with a docstring that states what the module does, what it reads and writes, and how to run it; the non-obvious choices are explained in the code where they are made (for example, why the backbone is recomputed in the backward pass only for whole photographs). A single notebook, \texttt{PIPELINE.ipynb}, runs the whole pipeline in nine numbered sections that follow Fig.~\ref{fig:pipeline}: configuration and integrity checks, training, inference, scorer, selection, boundary redraw, results, illustrations, and the ideas that were tried and rejected. Each section starts with a text cell that explains the step, its settings and the module that runs it; every output that already exists is reused, so an interrupted run resumes where it stopped. A script, \texttt{run\_headless.py}, runs the same cells without Jupyter. The README gives the folds, the hardware, the training times, the layout and the steps to reproduce the result.
-
-\paragraph{Reproducibility} The data, the 40 trained models and the shipped inference outputs are checked against SHA-256 checksums before use; a missing or changed model is retrained only after confirmation, with its expected training time. The last cell of the notebook compares the rebuilt submission with the submitted file, by checksum and then mask by mask. From the same U-Net maps, the selection and the redraw rebuild the submitted file byte for byte; with the downloaded models, a run takes about 50 minutes on four 12\,GB GPUs, and retraining every model about 115 GPU-hours. The training code was also checked against the original runs, which give the same losses at the first steps. The code is released under the AGPL-3.0 licence, with the notices of the third-party code it adapts.
-
-\paragraph{Limitations} The checks are end to end: there is no unit-test suite, and fewer than half of the public functions have their own docstring. The 40 models and the files passed between stages also make the pipeline heavy to run from scratch (Section~\ref{sec:evaluation}).
+\gp{\subsection{Implementation details}\label{sec:details}
+All models are trained with PyTorch in bf16 on 12\,GB GPUs. \textit{Mask2Former}: 50 epochs, AdamW with a learning rate of $10^{-4}$ ($10^{-5}$ for the backbone) and a cosine decay; a step holds 8 crops of 1024 pixels or, in a quarter of the steps, 2 whole photographs; the crops of the second family are zoomed by a random factor in $[0.8, 1.25]$. \textit{Candidates}: class probability at least 0.02, area at least 40 pixels, views linked at an IoU of 0.5. \textit{U-Nets}: inputs clipped to $[-6, 4]$. \textit{Scorer}: LightGBM with 300 rounds and 15 leaves, averaged over 10 seeds. \textit{Selection}: $\theta = 0.1$ and $\tau = 0.25$, from a grid on OOF PQ. \textit{Redraw}: $r = 2$ pixels, a shift of 0.25 pixel, and a minimum mask area of 100 pixels.}
 
 % ==================================== %
-%              CONCLUSION              %
+%       CONCLUSION AND FUTURE WORK     %
 % ==================================== %
-\section{Conclusion}\label{sec:conclusion}
-We segmented solar filaments in GONG H-$\alpha$ photographs as instances, starting from one observation: candidates are not the bottleneck, as one Mask2Former already proposes a candidate for 85--89\% of the annotated filaments, so the gain lies in choosing which ones to submit. Our pipeline generates candidates with two Mask2Former families over 16 test-time views, describes each one by 129 numbers drawn from its shape and from independently trained Mask R-CNN, U-Net and detector models, predicts with LightGBM the IoU it will reach with the annotators, keeps the best non-overlapping set by solving an exact integer program, and redraws its boundary at full resolution from the U-Net maps. Every step was kept only if it improved the out-of-fold PQ, judged with paired bootstrap intervals. The pipeline reaches an OOF PQ of 0.4801, against 0.4629 for a single Mask2Former with a fixed threshold and 0.340 between two annotators, and a PQ of 0.42 on the public and 0.39 on the private leaderboard.
+\section{Conclusion and future work}\label{sec:conclusion}
+We segmented solar filaments as instances by generating candidates with two Mask2Former families, scoring them with LightGBM and independent evidence models, selecting the best non-overlapping set exactly, and redrawing its boundaries at full resolution. It reaches an OOF PQ of 0.4801, above the 0.340 of inter-annotator agreement, and 0.42 / 0.39 on the public / private leaderboards.
 
-The learned scorer and the exact selection bring the largest gain, and the full-resolution redraw the next one; a second input family and the tiled detector add little. On the H-$\alpha$ photographs, the submitted masks are thin, elongated and curved like the filaments, and leave sunspots and plage out; they are slightly wider, smoother and shorter than the annotations, and few are submitted on faint filaments and near the limb. The remaining gap is mostly set by the disagreement between annotators, which a scorer can only average. Training on the filaments that the annotators agree on, and learning when annotators join the pieces of a filament into one, are the next steps. The code, the trained models and a single notebook that rebuilds the submitted file are public.}
+The main limit is the annotations: on observations with several annotators, 71\% of the OOF misses of our first model were filaments that no other annotator drew, and 54\% of its false positives matched another annotator's filament. Our next steps are to train on the filaments that annotators agree on, and to learn when they join two pieces into one.}
+
 
 % ==================================== %
 %            ACKNOWLEDGMENT            %
@@ -313,7 +252,7 @@ The learned scorer and the exact selection bring the largest gain, and the full-
 
     \tpl{This work utilizes GONG data obtained by the NSO Integrated Synoptic Program, managed by the National Solar Observatory, which is operated by the Association of Universities for Research in Astronomy (AURA), Inc. under a cooperative agreement with the National Science Foundation and with contribution from the National Oceanic and Atmospheric Administration. The GONG network of instruments is hosted by the Big Bear Solar Observatory, High Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias, and Cerro Tololo Interamerican Observatory.}
 
-\bibliographystyle{ACM-Reference-Format}
+\bibliographystyle{ACM-Reference-Format-citeorder}
 \bibliography{main}
 
 \end{document}

@@ -6,8 +6,8 @@ discussions. This was a long, meticulous competition for us, and most of what we
 
 ## TL;DR
 
-- **Result.** Out-of-fold PQ **0.4801** on the 707 training photos (95% bootstrap interval 0.4714–0.4882), public LB **0.42**,
-  private LB **0.39** (rank 117 of 1,567).
+- **Result.** Out-of-fold PQ **0.4801** on the 707 training photos (95% bootstrap interval 0.4714–0.4882), public LB **0.42**
+  (rank 36), private LB **0.39** (rank 10 of 1,708).
 - **Observation.** Our candidate pool already contains a match (IoU > 0.5) for ~90% of the annotated filaments. Choosing perfectly
   among the candidates we already had would score ~0.58 out of fold, against 0.48 for our final selection: the bottleneck is
   selection, not candidate generation.
