@@ -210,10 +210,11 @@ pip install -r requirements.txt jupyterlab   # torch 2.8 for CUDA 12.8 comes fro
 jupyter lab PIPELINE.ipynb          # run all cells; or headless: python run_headless.py
 ```
 
-* **Data.** The photos and annotations (`data.zip`, 0.7 GB) are downloaded from Google Drive into `data/` (the link and SHA-256 are in
-  `reference/DOWNLOADS.json`; you can also place the file in `downloads/`). Its SHA-256 is checked before extraction, and every photo in
-  section 0.3. Only if the Drive download fails is the Kaggle API used: then put your API token in `~/.kaggle/kaggle.json` and accept the
-  competition rules.
+* **Data** (photos and annotations, 0.7 GB, into `data/`). **With a Kaggle token** (`~/.kaggle/access_token` or `kaggle.json`, or
+  `KAGGLE_API_TOKEN`; competition rules accepted) they are downloaded from Kaggle and replace the data already there. **Without a token, or
+  if Kaggle fails**, the data already in `data/` are kept, else `data.zip` is downloaded from Google Drive (link and SHA-256 in
+  `reference/DOWNLOADS.json`; you can also place the file in `downloads/`), its SHA-256 checked before extraction. Whatever the source,
+  every photo is checked by SHA-256 in section 0.3.
 * **Models.** `filament_models.tar` (7.4 GB: the trained models and the inference outputs) is downloaded from Google Drive (the link is in
   `reference/DOWNLOADS.json`). You can also place it in `downloads/`. Its SHA-256 is checked before extraction.
 * **Hardware.** Linux, NVIDIA GPUs with 12 GB or more, a driver supporting CUDA 12.8, and ~35 GB free for `work/scratch`. Keep the

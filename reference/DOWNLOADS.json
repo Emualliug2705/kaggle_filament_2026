@@ -1,5 +1,5 @@
 {
- "_comment": "Where section 0.1 of PIPELINE.ipynb downloads what is missing. data: the competition data as data.zip on Google Drive (\"Anyone with the link\"), SHA-256 checked; the Kaggle API is the fallback. gdrive: the Google Drive link or file id of filament_models.tar (shared as \"Anyone with the link\"); or kaggle_dataset: a private Kaggle dataset holding it; or put the file in downloads/.",
+ "_comment": "Where section 0.1 of PIPELINE.ipynb downloads what is missing. data: the competition data as data.zip on Google Drive (\"Anyone with the link\"), SHA-256 checked, used when no Kaggle token is set or the Kaggle download fails. gdrive: the Google Drive link or file id of filament_models.tar (shared as \"Anyone with the link\"); or kaggle_dataset: a private Kaggle dataset holding it; or put the file in downloads/.",
  "kaggle_competition": "filament-segmentation-2026",
  "data": {
   "name": "data.zip",
